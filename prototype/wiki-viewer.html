@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wiki Speedrun — article viewer prototype</title>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<style>
+  :root {
+    --sidebar-w: 260px;
+    font-family: system-ui, sans-serif;
+  }
+  body { margin: 0; display: flex; height: 100vh; overflow: hidden; }
+
+  #sidebar {
+    width: var(--sidebar-w);
+    flex-shrink: 0;
+    background: #1e2430;
+    color: #e6e9ef;
+    padding: 16px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  #sidebar h1 { font-size: 16px; margin: 0; }
+  #sidebar label { font-size: 12px; opacity: .7; display: block; margin-bottom: 4px; }
+  #sidebar input {
+    width: 100%; box-sizing: border-box; padding: 6px 8px;
+    border-radius: 6px; border: 1px solid #3a4356;
+    background: #141822; color: #e6e9ef;
+  }
+  #sidebar button {
+    padding: 8px; border: 0; border-radius: 6px; cursor: pointer;
+    background: #4c7dff; color: white; font-weight: 600;
+  }
+  #sidebar button.secondary { background: #3a4356; }
+  .stat { background: #141822; border-radius: 8px; padding: 10px; }
+  .stat .value { font-size: 22px; font-weight: 700; }
+  .stat .label { font-size: 11px; opacity: .6; text-transform: uppercase; letter-spacing: .05em; }
+  #path { font-size: 12px; overflow-y: auto; flex: 1; line-height: 1.7; }
+  #path .hop { opacity: .8; }
+  #status { font-size: 12px; min-height: 16px; color: #8fa3c8; }
+  #status.error { color: #ff7b7b; }
+
+  #article-pane { flex: 1; overflow-y: auto; background: #fff; }
+  #article {
+    max-width: 860px; margin: 0 auto; padding: 24px 32px 80px;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 16px; line-height: 1.6; color: #202122;
+  }
+  #article h2 { border-bottom: 1px solid #a2a9b1; font-weight: 400; }
+  #article a { color: #3366cc; text-decoration: none; }
+  #article a:hover { text-decoration: underline; }
+  #article a.blocked { color: #999; cursor: not-allowed; }
+  #article img { max-width: 100%; height: auto; }
+  #article table { border-collapse: collapse; font-size: 14px; font-family: system-ui, sans-serif; }
+  #article table.infobox {
+    float: right; clear: right; margin: 0 0 16px 16px; max-width: 300px;
+    border: 1px solid #a2a9b1; background: #f8f9fa; padding: 4px;
+  }
+  #article th, #article td { padding: 3px 6px; vertical-align: top; }
+  #article figure { margin: 8px; }
+  #article figcaption { font-size: 13px; color: #54595d; font-family: system-ui, sans-serif; }
+  #article .mw-ref { font-size: 12px; }
+  #article-title { font-size: 28px; font-family: Georgia, serif; border-bottom: 1px solid #a2a9b1; padding-bottom: 6px; }
+  #loading-overlay {
+    display: none; position: absolute; inset: 0;
+    background: rgba(255,255,255,.7); align-items: center; justify-content: center;
+    font-size: 20px; font-family: system-ui, sans-serif;
+  }
+  #article-pane { position: relative; }
+  #article-pane.loading #loading-overlay { display: flex; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>Wiki Speedrun — viewer prototype</h1>
+  <div>
+    <label for="title-input">Load article by title</label>
+    <input id="title-input" value="Miles Davis" spellcheck="false">
+  </div>
+  <button id="load-btn">Load article</button>
+  <button id="random-btn" class="secondary">Random article</button>
+  <div id="status"></div>
+  <div class="stat">
+    <div class="value" id="click-count">0</div>
+    <div class="label">Clicks</div>
+  </div>
+  <div class="stat" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+    <div class="label" style="margin-bottom:6px">Path</div>
+    <div id="path"></div>
+  </div>
+</div>
+
+<div id="article-pane">
+  <div id="article">
+    <p style="font-family: system-ui, sans-serif; color:#555">
+      Load an article from the sidebar to start. Click any blue link inside the
+      article to navigate — clicks are counted, external links are disabled.
+    </p>
+  </div>
+  <div id="loading-overlay">Loading…</div>
+</div>
+
+<script>
+const API_BASE = 'https://en.wikipedia.org/api/rest_v1/page/html/';
+const ACTION_API = 'https://en.wikipedia.org/w/api.php';
+
+const articleEl = document.getElementById('article');
+const paneEl = document.getElementById('article-pane');
+const statusEl = document.getElementById('status');
+const pathEl = document.getElementById('path');
+const clickCountEl = document.getElementById('click-count');
+
+let clicks = 0;
+let currentTitle = null;
+
+function setStatus(msg, isError = false) {
+  statusEl.textContent = msg;
+  statusEl.className = isError ? 'error' : '';
+}
+
+// --- Fetch + sanitize ---------------------------------------------------
+
+async function fetchArticleHtml(title) {
+  const res = await fetch(API_BASE + encodeURIComponent(title.replaceAll(' ', '_')), {
+    headers: { 'Accept': 'text/html' },
+  });
+  if (res.status === 404) throw new Error(`No article named “${title}”`);
+  if (!res.ok) throw new Error(`Wikipedia returned ${res.status}`);
+  return res.text();
+}
+
+function sanitizeArticle(rawHtml) {
+  // The REST API returns a full HTML document (Parsoid output). Parse it,
+  // strip chrome we don't want, then sanitize the body.
+  const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
+
+  // Remove elements that are noise or navigation escape hatches for the game.
+  const STRIP_SELECTORS = [
+    'style',                          // Parsoid inline styles — we bring our own
+    'link',
+    'span.mw-editsection',            // [edit] links
+    '.navbox', '.vertical-navbox',    // giant bottom nav tables full of links — debatable, but they’re mostly meta
+    '.mw-authority-control',
+    'table.metadata',                 // "this article needs cleanup" banners
+    '.hatnote + .hatnote',
+  ];
+  doc.querySelectorAll(STRIP_SELECTORS.join(',')).forEach(el => el.remove());
+
+  return DOMPurify.sanitize(doc.body.innerHTML, {
+    // Keep default safe tags; explicitly forbid things that could break out.
+    FORBID_TAGS: ['form', 'input', 'iframe', 'object', 'embed', 'audio', 'video', 'style'],
+    FORBID_ATTR: ['onclick', 'onerror', 'onload', 'srcset'], // srcset: keep it simple, plain src works
+    // Parsoid uses rel="mw:WikiLink" etc. — keep rel/href/title for link routing
+    ADD_ATTR: ['rel'],
+  });
+}
+
+// --- Link interception ---------------------------------------------------
+
+function classifyLink(a) {
+  const href = a.getAttribute('href') || '';
+  const rel = a.getAttribute('rel') || '';
+
+  if (href.startsWith('#')) return { kind: 'fragment', target: href };
+
+  // Parsoid internal links look like "./Article_Title" with rel="mw:WikiLink"
+  if (rel.includes('mw:WikiLink') || href.startsWith('./')) {
+    let title = decodeURIComponent(href.replace(/^\.\//, '').split('#')[0]);
+    // Non-article namespaces (File:, Help:, Category:, …) are not part of the game
+    if (/^(File|Category|Help|Wikipedia|Special|Talk|Portal|Template|Template_talk|Draft|Module|MediaWiki):/i.test(title)) {
+      return { kind: 'blocked' };
+    }
+    // Red links (article doesn't exist)
+    if (a.classList.contains('new')) return { kind: 'blocked' };
+    return { kind: 'article', title: title.replaceAll('_', ' ') };
+  }
+
+  // Anything else (external links, mw:ExtLink) is out of bounds
+  return { kind: 'blocked' };
+}
+
+articleEl.addEventListener('click', (e) => {
+  const a = e.target.closest('a');
+  if (!a || !articleEl.contains(a)) return;
+  e.preventDefault();
+
+  const link = classifyLink(a);
+  if (link.kind === 'fragment') {
+    const target = document.getElementById(link.target.slice(1));
+    if (target) target.scrollIntoView({ behavior: 'smooth' });
+    return;
+  }
+  if (link.kind === 'blocked') {
+    setStatus('That link is out of bounds.');
+    return;
+  }
+  // Legal hop: count it and navigate
+  clicks++;
+  clickCountEl.textContent = clicks;
+  loadArticle(link.title, { addToPath: true });
+});
+
+// --- Loading -------------------------------------------------------------
+
+async function loadArticle(title, { addToPath = false, resetRun = false } = {}) {
+  paneEl.classList.add('loading');
+  setStatus(`Loading “${title}”…`);
+  try {
+    const raw = await fetchArticleHtml(title);
+    const clean = sanitizeArticle(raw);
+    articleEl.innerHTML = `<div id="article-title">${escapeHtml(title)}</div>` + clean;
+    paneEl.scrollTop = 0;
+    currentTitle = title;
+
+    if (resetRun) {
+      clicks = 0;
+      clickCountEl.textContent = '0';
+      pathEl.innerHTML = '';
+    }
+    if (addToPath || resetRun) {
+      const hop = document.createElement('div');
+      hop.className = 'hop';
+      hop.textContent = `${pathEl.children.length === 0 ? '⚑' : '→'} ${title}`;
+      pathEl.appendChild(hop);
+      pathEl.scrollTop = pathEl.scrollHeight;
+    }
+    setStatus('');
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    paneEl.classList.remove('loading');
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+async function loadRandom() {
+  setStatus('Picking random article…');
+  const url = `${ACTION_API}?action=query&list=random&rnnamespace=0&rnlimit=1&format=json&origin=*`;
+  const res = await fetch(url);
+  const data = await res.json();
+  const title = data.query.random[0].title;
+  document.getElementById('title-input').value = title;
+  loadArticle(title, { resetRun: true });
+}
+
+document.getElementById('load-btn').addEventListener('click', () => {
+  const title = document.getElementById('title-input').value.trim();
+  if (title) loadArticle(title, { resetRun: true });
+});
+document.getElementById('title-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('load-btn').click();
+});
+document.getElementById('random-btn').addEventListener('click', loadRandom);
+</script>
+</body>
+</html>
