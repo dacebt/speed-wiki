@@ -13,6 +13,7 @@ export function reduce(room: CoreRoom, event: RoomEvent): CoreRoom {
         cosmetics: { faceId: 'scholar', hatId: 'none' },
         isHost: room.players.length === 0,
         score: 0,
+        roundPoints: 0,
         path: [],
         finishedRank: null,
         finishedAfterMs: null,
@@ -61,6 +62,7 @@ export function reduce(room: CoreRoom, event: RoomEvent): CoreRoom {
           finishedRank: null,
           finishedAfterMs: null,
           gaveUp: false,
+          roundPoints: 0,
         })),
       };
 
@@ -85,7 +87,10 @@ export function reduce(room: CoreRoom, event: RoomEvent): CoreRoom {
       return {
         ...room,
         phase: 'results',
-        players: room.players.map((p) => ({ ...p, score: p.score + (points.get(p.id) ?? 0) })),
+        players: room.players.map((p) => {
+          const earned = points.get(p.id) ?? 0;
+          return { ...p, score: p.score + earned, roundPoints: earned };
+        }),
       };
     }
 

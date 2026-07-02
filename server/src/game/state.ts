@@ -9,6 +9,7 @@ export interface CorePlayer {
   cosmetics: PlayerCosmetics;
   isHost: boolean;
   score: number;
+  roundPoints: number;
   path: string[];
   finishedRank: number | null;
   finishedAfterMs: number | null;

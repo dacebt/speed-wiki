@@ -12,6 +12,8 @@ export interface PlayerView {
   isHost: boolean;
   /** Session score, accumulated across rounds. */
   score: number;
+  /** Points awarded for the round just ended; 0 while racing. Server-computed. */
+  roundPoints: number;
   /** Articles visited this round, in order, starting with the start article. */
   path: string[];
   /** Legal hops made this round (path.length - 1, kept explicit for display). */

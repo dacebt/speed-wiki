@@ -1,0 +1,146 @@
+.race {
+  height: 100%;
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+}
+
+/* ── Wager board (sidebar) ─────────────────────────────────────── */
+
+.race__board {
+  width: 270px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+.race__cartouche { display: flex; gap: 20px; padding: 14px 18px; }
+
+.race__stat { display: flex; flex-direction: column; }
+
+.race__stat-value {
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.race__stat-value--timer { color: var(--gold-bright); }
+
+.race__gossip {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+
+.race__players {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.race__player {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-raised);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 10px;
+  transition: order var(--speed-reorder);
+}
+
+.race__player--you { border-color: var(--gold-dim); }
+
+.race__player-info { flex: 1; min-width: 0; }
+
+.race__player-name { font-weight: 600; font-size: 14px; display: block; }
+
+.race__medal { color: var(--gold-bright); font-size: 12px; }
+
+.race__player-status {
+  font-size: 12px;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.race__player-clicks {
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.race__giveup { width: 100%; }
+
+/* ── Stage (header plate + folio) ──────────────────────────────── */
+
+.race__stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.race__plate { padding: 12px 20px; }
+
+.race__route {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.race__route-label { margin: 0; }
+
+.race__route-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 19px;
+}
+
+.race__route-title--goal {
+  color: var(--gold-bright);
+  border-bottom: 2px solid var(--gold);
+}
+
+.race__manicule { color: var(--gold); font-size: 20px; }
+
+.race__trail {
+  margin-top: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.race__pane-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+
+.race__done-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(30, 22, 16, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.race__done-card { max-width: 440px; text-align: center; }
+
+.race__done-title { font-size: 26px; color: var(--gold-bright); margin-bottom: 8px; }

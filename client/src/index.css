@@ -1,111 +1,173 @@
+/* The Grand Salon — theme tokens and base chrome.
+   Wiki Speedrun as an 18th-century salon wager: candlelit walnut room,
+   engraved gilt rules, wax seals; the article is the one lit page. */
+
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  /* Palette */
+  --bg: #1e1610;
+  --surface: #2c2118;
+  --surface-raised: #3a2c1f;
+  --paper: #f7f1e3;
+  --paper-edge: #e4d8be;
+  --ink: #2b2118;
+  --ink-on-dark: #f0e6d2;
+  --accent: #a8322d;
+  --accent-hover: #c03e38;
+  --gold: #c9a227;
+  --gold-bright: #e8c55a;
+  --gold-dim: rgba(201, 162, 39, 0.35);
+  --sage: #5e7a5a;
+  --muted: #8c7b66;
+  --link: #3366cc;
+  --link-visited: #795cb2;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* Typography */
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-flavor: 'IM Fell English', Georgia, serif;
+  --font-ui: 'Inter', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-article-heading: 'Linux Libertine', Georgia, 'Times New Roman', serif;
+  --font-article-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* Atmosphere */
+  --candlelight: radial-gradient(ellipse 120% 90% at 50% 30%, rgba(232, 197, 90, 0.07), transparent 60%);
+  --pane-shadow: 0 8px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4),
+    0 0 40px rgba(232, 197, 90, 0.12);
+  --glow-hover: 0 0 12px rgba(232, 197, 90, 0.25);
 
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
+  /* Motion */
+  --ease-flourish: cubic-bezier(0.22, 1, 0.36, 1);
+  --speed-quick: 150ms;
+  --speed-reorder: 350ms;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
+* { box-sizing: border-box; }
 
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
+html, body, #root { height: 100%; }
 
 body {
   margin: 0;
-}
-
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
-
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
-
-code {
+  background-color: var(--bg);
+  background-image: var(--candlelight);
+  background-attachment: fixed;
+  color: var(--ink-on-dark);
+  font-family: var(--font-ui);
   font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+  line-height: 1.5;
+}
+
+/* ── Shared chrome ─────────────────────────────────────────────── */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--gold-dim);
+  box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 4px rgba(201, 162, 39, 0.45);
+  border-radius: 6px;
+  padding: 24px;
+  position: relative;
+}
+
+.panel--fleuron::before {
+  content: '❦';
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  color: var(--gold);
+  opacity: 0.4;
+  font-size: 14px;
+}
+
+.label {
+  font-variant: small-caps;
+  letter-spacing: 0.12em;
+  font-size: 12px;
+  color: var(--muted);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.flavor {
+  font-family: var(--font-flavor);
+  font-style: italic;
+  color: var(--muted);
+}
+
+.btn {
+  font-family: var(--font-ui);
+  font-variant: small-caps;
+  letter-spacing: 0.1em;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 10px 22px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: box-shadow var(--speed-quick), background var(--speed-quick);
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: var(--ink-on-dark);
+  border-color: rgba(0, 0, 0, 0.3);
+}
+.btn--primary:hover:not(:disabled) { background: var(--accent-hover); box-shadow: var(--glow-hover); }
+
+.btn--quiet {
+  background: var(--surface-raised);
+  color: var(--ink-on-dark);
+  border-color: var(--gold-dim);
+}
+.btn--quiet:hover:not(:disabled) { box-shadow: var(--glow-hover); }
+
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.input {
+  background: var(--bg);
+  border: 1px solid var(--gold-dim);
+  border-radius: 6px;
+  color: var(--ink-on-dark);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  padding: 10px 12px;
+  width: 100%;
+}
+.input:focus { outline: 2px solid var(--gold-bright); outline-offset: 1px; }
+
+.seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--accent-hover), var(--accent) 55%, #7c211d);
+  box-shadow: inset 0 -4px 10px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.5);
+  color: var(--ink-on-dark);
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 24px;
+  letter-spacing: 0.08em;
+  user-select: all;
+}
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-raised);
+  border: 1px solid var(--gold-dim);
+  border-radius: 6px;
+  padding: 12px 20px;
+  font-family: var(--font-flavor);
+  font-style: italic;
+  color: var(--gold-bright);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+}
+
+.screen-title {
+  font-family: var(--font-display);
+  font-weight: 900;
+  color: var(--ink-on-dark);
+  margin: 0;
 }

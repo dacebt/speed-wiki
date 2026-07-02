@@ -14,6 +14,7 @@ export function toRoomSync(room: CoreRoom): RoomSync {
       cosmetics: p.cosmetics,
       isHost: p.isHost,
       score: p.score,
+      roundPoints: p.roundPoints,
       path: p.path,
       clicks: Math.max(0, p.path.length - 1),
       finishedRank: p.finishedRank,
