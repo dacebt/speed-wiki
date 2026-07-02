@@ -4,6 +4,8 @@ import './article.css';
 
 interface ArticlePaneProps {
   title: string;
+  /** Bumped on every navigate so re-clicking the same link after a failed fetch retries the load. */
+  seq: number;
   /** Called when a requested article has loaded, with its canonical title. */
   onArrived: (canonicalTitle: string) => void;
   /** Called when the user clicks a legal article link. */
@@ -21,7 +23,14 @@ interface PaneState {
   error: string | null;
 }
 
-export function ArticlePane({ title, onArrived, onNavigate, onBlocked, frozen }: ArticlePaneProps) {
+export function ArticlePane({
+  title,
+  seq,
+  onArrived,
+  onNavigate,
+  onBlocked,
+  frozen,
+}: ArticlePaneProps) {
   const [pane, setPane] = useState<PaneState>({
     html: '',
     loadedTitle: null,
@@ -55,7 +64,7 @@ export function ArticlePane({ title, onArrived, onNavigate, onBlocked, frozen }:
     return () => {
       cancelled = true;
     };
-  }, [title]);
+  }, [title, seq]);
 
   function handleClick(e: React.MouseEvent) {
     const anchor = (e.target as HTMLElement).closest('a');
