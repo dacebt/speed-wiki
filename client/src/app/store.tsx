@@ -17,16 +17,24 @@ export interface AppState {
   /** Our player id, assigned by the server on the first sync. */
   you: string | null;
   room: RoomSync | null;
+  /** serverClock − clientClock at last sync; add to Date.now() to compare with server timestamps. */
+  clockOffset: number;
   notice: { code: ErrorCode | 'disconnected'; message: string } | null;
 }
 
 export type AppEvent =
   | { type: 'socket/connected' }
   | { type: 'socket/disconnected' }
-  | { type: 'server/message'; message: ServerMessage }
+  | { type: 'server/message'; message: ServerMessage; receivedAt: number }
   | { type: 'ui/dismissNotice' };
 
-const initialState: AppState = { connected: false, you: null, room: null, notice: null };
+const initialState: AppState = {
+  connected: false,
+  you: null,
+  room: null,
+  clockOffset: 0,
+  notice: null,
+};
 
 export function reduce(state: AppState, event: AppEvent): AppState {
   switch (event.type) {
@@ -38,12 +46,18 @@ export function reduce(state: AppState, event: AppEvent): AppState {
         connected: false,
         you: null,
         room: null,
+        clockOffset: 0,
         notice: { code: 'disconnected', message: 'The connection to the salon was lost.' },
       };
     case 'server/message': {
       const { message } = event;
       if (message.type === 'room/sync') {
-        return { ...state, room: message.room, you: message.you };
+        return {
+          ...state,
+          room: message.room,
+          you: message.you,
+          clockOffset: message.at - event.receivedAt,
+        };
       }
       return { ...state, notice: { code: message.code, message: message.message } };
     }
@@ -61,7 +75,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       subscribe({
-        onMessage: (message) => dispatch({ type: 'server/message', message }),
+        onMessage: (message) =>
+          dispatch({ type: 'server/message', message, receivedAt: Date.now() }),
         onConnect: () => dispatch({ type: 'socket/connected' }),
         onDisconnect: () => dispatch({ type: 'socket/disconnected' }),
       }),

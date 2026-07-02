@@ -142,8 +142,9 @@ function react(runtime: RoomRuntime, event: RoomEvent): void {
 
 function broadcast(runtime: RoomRuntime): void {
   const room = toRoomSync(runtime.state);
+  const at = Date.now();
   for (const [playerId, socket] of runtime.members) {
-    send(socket, { type: 'room/sync', room, you: playerId });
+    send(socket, { type: 'room/sync', room, you: playerId, at });
   }
 }
 

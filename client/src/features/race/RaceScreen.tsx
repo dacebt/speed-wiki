@@ -38,6 +38,7 @@ export function RaceScreen() {
         code: 'wrong-phase',
         message: 'That path leads out of the Encyclopédie. Out of bounds.',
       },
+      receivedAt: Date.now(),
     });
   }
 

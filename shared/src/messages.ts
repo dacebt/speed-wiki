@@ -24,7 +24,9 @@ export type ErrorCode =
   | 'article-fetch-failed';
 
 export type ServerMessage =
-  | { type: 'room/sync'; room: RoomSync; you: string }
+  /** `at` is the server clock at send time — clients derive a clock offset
+      from it so countdowns and deadlines render correctly despite skew. */
+  | { type: 'room/sync'; room: RoomSync; you: string; at: number }
   | { type: 'room/error'; code: ErrorCode; message: string };
 
 /** Socket.io event name for client→server intents. */

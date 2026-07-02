@@ -41,7 +41,12 @@ export function subscribe(handlers: SocketHandlers): () => void {
 function parseServerMessage(raw: unknown): ServerMessage | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const msg = raw as Record<string, unknown>;
-  if (msg.type === 'room/sync' && typeof msg.you === 'string' && typeof msg.room === 'object') {
+  if (
+    msg.type === 'room/sync' &&
+    typeof msg.you === 'string' &&
+    typeof msg.room === 'object' &&
+    typeof msg.at === 'number'
+  ) {
     return raw as ServerMessage;
   }
   if (msg.type === 'room/error' && typeof msg.code === 'string' && typeof msg.message === 'string') {
