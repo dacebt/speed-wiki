@@ -35,7 +35,7 @@ export function decide(room: CoreRoom, intent: CoreIntent): Decision {
       return decideClient(room, intent.playerId, intent.at, intent.intent);
     case 'sys/countdownFinished': {
       if (room.phase !== 'countdown') return { ok: true, events: [] };
-      const roundNumber = (room.round?.roundNumber ?? 0) + 1;
+      const roundNumber = room.roundsPlayed + 1;
       return {
         ok: true,
         events: [
@@ -120,9 +120,9 @@ function decideClient(
 
     case 'race/hop': {
       if (!player) return reject('not-in-room', 'You are not in this room.');
-      if (room.phase !== 'racing' || !room.round) {
-        return reject('wrong-phase', 'No race is underway.');
-      }
+      // A hop can arrive just after a round ends (fetch was in flight when the
+      // timer struck); that is not a user error, just a stale intent.
+      if (room.phase !== 'racing' || !room.round) return { ok: true, events: [] };
       if (player.finishedRank !== null || player.gaveUp) return { ok: true, events: [] };
 
       // Hop legality (was the article reachable from the previous page?) is a
@@ -131,7 +131,9 @@ function decideClient(
         { type: 'HopMade', playerId, article: intent.article, at },
       ];
       if (sameArticle(intent.article, room.round.goalArticle)) {
-        const rank = room.players.filter((p) => p.finishedRank !== null).length + 1;
+        // Monotonic: highest rank assigned so far + 1, so a finisher leaving
+        // the room cannot cause a later finisher to receive a duplicate rank.
+        const rank = Math.max(0, ...room.players.map((p) => p.finishedRank ?? 0)) + 1;
         events.push({
           type: 'PlayerFinished',
           playerId,
@@ -148,7 +150,7 @@ function decideClient(
 
     case 'race/giveUp': {
       if (!player) return reject('not-in-room', 'You are not in this room.');
-      if (room.phase !== 'racing') return reject('wrong-phase', 'No race is underway.');
+      if (room.phase !== 'racing') return { ok: true, events: [] };
       if (player.finishedRank !== null || player.gaveUp) return { ok: true, events: [] };
       const events: RoomEvent[] = [{ type: 'PlayerGaveUp', playerId, at }];
       const after = reduce(room, events[0]!);

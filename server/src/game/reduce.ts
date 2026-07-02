@@ -87,6 +87,7 @@ export function reduce(room: CoreRoom, event: RoomEvent): CoreRoom {
       return {
         ...room,
         phase: 'results',
+        roundsPlayed: room.roundsPlayed + 1,
         players: room.players.map((p) => {
           const earned = points.get(p.id) ?? 0;
           return { ...p, score: p.score + earned, roundPoints: earned };

@@ -23,6 +23,7 @@ export interface CoreRoom {
   round: RoundView | null;
   countdownEndsAt: number | null;
   pendingHardMode: boolean;
+  roundsPlayed: number;
 }
 
 export function initialRoom(code: string): CoreRoom {
@@ -33,6 +34,7 @@ export function initialRoom(code: string): CoreRoom {
     round: null,
     countdownEndsAt: null,
     pendingHardMode: false,
+    roundsPlayed: 0,
   };
 }
 

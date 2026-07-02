@@ -41,7 +41,7 @@ export interface RoomSync {
   code: string;
   phase: RoomPhase;
   players: PlayerView[];
-  /** Present during countdown/racing/results; null in the first lobby. */
+  /** Present during racing, and in results for the round just run; null in lobby and countdown. */
   round: RoundView | null;
   /** Server epoch ms when the countdown ends; present only in countdown phase. */
   countdownEndsAt: number | null;
