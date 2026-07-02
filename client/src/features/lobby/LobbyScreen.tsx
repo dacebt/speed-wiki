@@ -1,5 +1,5 @@
 import { FACES, HATS, MAX_PLAYERS, type PlayerView } from '@wikispeedrun/shared';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../../app/store';
 import { Avatar } from '../../components/Avatar';
 import { sendIntent } from '../../lib/socket';
@@ -92,6 +92,8 @@ export function LobbyScreen() {
 function useCopyFeedback() {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
 
   async function copy(text: string) {
     try {
