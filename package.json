@@ -6,10 +6,16 @@
     "dev": "concurrently -n server,client -c blue,magenta \"pnpm --filter server dev\" \"pnpm --filter client dev\"",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm -r build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "oxlint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
     "concurrently": "^10.0.3",
+    "oxlint": "^1.72.0",
+    "prettier": "^3.9.4",
     "typescript": "~6.0.3",
     "vitest": "^4.1.9"
   },
