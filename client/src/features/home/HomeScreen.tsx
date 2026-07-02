@@ -34,24 +34,24 @@ export function HomeScreen() {
       <header className="home__masthead">
         <h1 className="screen-title home__title">Wiki Speedrun</h1>
         <p className="flavor home__subtitle">
-          A wager of wits in the Grand Salon — first through the Encyclopédie to the truth.
+          Race your friends through Wikipedia links — first to the goal article wins.
         </p>
       </header>
 
       <div className="panel panel--fleuron home__card">
-        <label className="label" htmlFor="player-name">Thy nom de plume</label>
+        <label className="label" htmlFor="player-name">Your name</label>
         <input
           id="player-name"
           className="input"
           value={name}
           maxLength={MAX_NAME_LENGTH}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Mme. de Curiosité"
+          placeholder="Jane Doe"
           autoComplete="off"
         />
 
         <button className="btn btn--primary home__create" onClick={createRoom} disabled={!nameOk}>
-          Convene a Salon
+          Create a Room
         </button>
 
         <div className="home__divider">
@@ -63,7 +63,7 @@ export function HomeScreen() {
             className="input home__code"
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="SEAL"
+            placeholder="CODE"
             maxLength={ROOM_CODE_LENGTH}
             aria-label="Room code"
             autoComplete="off"
@@ -73,12 +73,12 @@ export function HomeScreen() {
             type="submit"
             disabled={!nameOk || code.trim().length !== ROOM_CODE_LENGTH}
           >
-            Present Thy Invitation
+            Join Room
           </button>
         </form>
       </div>
 
-      <footer className="flavor home__footer">Sapere aude — dare to know (and to click fast).</footer>
+      <footer className="flavor home__footer">Dare to know (and to click fast).</footer>
     </main>
   );
 }

@@ -50,7 +50,7 @@ io.on('connection', (socket: Socket) => {
         socket.emit(MESSAGE_EVENT, {
           type: 'room/error',
           code: 'room-not-found',
-          message: 'No salon answers to that seal.',
+          message: 'No room found with that code.',
         });
         return;
       }

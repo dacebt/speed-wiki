@@ -17,14 +17,12 @@ export function ResultsScreen() {
       <header className="results__header">
         <span className="label">Round {room.round.roundNumber} — {room.round.startArticle} ☞ {room.round.goalArticle}</span>
         <h1 className="screen-title results__title">
-          {winner ? 'Enlightenment Achieved' : 'The Hour Has Struck'}
+          {winner ? 'Enlightenment Achieved' : "Time's Up"}
         </h1>
         {winner ? (
-          <p className="flavor results__proclamation">
-            {winner.name}, first to the truth. The salon applauds.
-          </p>
+          <p className="flavor results__proclamation">{winner.name} got there first…</p>
         ) : (
-          <p className="flavor results__proclamation">None reached the goal. The salon pretends not to notice.</p>
+          <p className="flavor results__proclamation">Nobody reached the goal. Awkward silence.</p>
         )}
       </header>
 
@@ -33,11 +31,11 @@ export function ResultsScreen() {
           <thead>
             <tr>
               <th className="label">Standing</th>
-              <th className="label">Philosophe</th>
-              <th className="label">Leaps</th>
+              <th className="label">Player</th>
+              <th className="label">Clicks</th>
               <th className="label">Time</th>
-              <th className="label">Livres Earned</th>
-              <th className="label">Fortune</th>
+              <th className="label">Points</th>
+              <th className="label">Total</th>
             </tr>
           </thead>
           <tbody>
@@ -67,10 +65,10 @@ export function ResultsScreen() {
 
       {me?.isHost ? (
         <button className="btn btn--primary results__again" onClick={() => sendIntent({ type: 'game/playAgain' })}>
-          Another Round, for Honour
+          Play Again
         </button>
       ) : (
-        <p className="flavor">The host deliberates on another round…</p>
+        <p className="flavor">Waiting for the host…</p>
       )}
     </main>
   );
@@ -86,8 +84,8 @@ function compareStanding(a: PlayerView, b: PlayerView): number {
 function standingLabel(p: PlayerView): string {
   if (p.finishedRank === 1) return '🏆 1st';
   if (p.finishedRank !== null) return `${ordinal(p.finishedRank)}`;
-  if (p.gaveUp) return 'Withdrew';
-  return 'Lost in the stacks';
+  if (p.gaveUp) return 'Gave up';
+  return 'Did not finish';
 }
 
 function pathSummary(p: PlayerView, index: number): string {

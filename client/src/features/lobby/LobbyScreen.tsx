@@ -17,17 +17,17 @@ export function LobbyScreen() {
   return (
     <main className="lobby">
       <header className="lobby__header">
-        <h1 className="screen-title lobby__title">The Salon Assembles</h1>
+        <h1 className="screen-title lobby__title">Lobby</h1>
         <div className="lobby__seal-wrap">
-          <span className="label">Seal of the Salon</span>
+          <span className="label">Room Code</span>
           <span className="seal">{room.code}</span>
-          <span className="flavor lobby__hint">Circulate the seal amongst thy friends.</span>
+          <span className="flavor lobby__hint">Share this code with your friends.</span>
         </div>
       </header>
 
       <section className="panel panel--fleuron lobby__players">
         <span className="label">
-          Learned company — {room.players.length} of {MAX_PLAYERS} seats taken
+          {room.players.length} of {MAX_PLAYERS} players
         </span>
         <ul className="lobby__list">
           {room.players.map((p) => (
@@ -48,18 +48,18 @@ export function LobbyScreen() {
                 onChange={(e) => setHardMode(e.target.checked)}
               />
               <span>
-                Hard mode <span className="flavor">— truly random pages, may the odds be dreadful</span>
+                Hard mode <span className="flavor">— truly random pages, may the odds be ever grim</span>
               </span>
             </label>
             <button
               className="btn btn--primary lobby__start"
               onClick={() => sendIntent({ type: 'game/start', hardMode })}
             >
-              Let the Pursuit of Knowledge Commence
+              Start Game
             </button>
           </>
         ) : (
-          <p className="flavor">Awaiting the host’s proclamation…</p>
+          <p className="flavor">Waiting for the host to start…</p>
         )}
       </section>
     </main>
@@ -81,10 +81,10 @@ function PlayerCard({
       <div className="lobby__player-info">
         <span className="lobby__player-name">
           {player.name}
-          {isYou && <span className="flavor"> (thee)</span>}
+          {isYou && <span className="flavor"> (you)</span>}
         </span>
-        {player.isHost && <span className="label lobby__host">☞ Host of the Salon</span>}
-        {showScore && <span className="lobby__score">{player.score} livres</span>}
+        {player.isHost && <span className="label lobby__host">Host</span>}
+        {showScore && <span className="lobby__score">{player.score} points</span>}
       </div>
     </li>
   );
@@ -100,7 +100,7 @@ function CosmeticsPicker({ me }: { me: PlayerView }) {
 
   return (
     <section className="panel lobby__cosmetics">
-      <span className="label">Commission thy portrait</span>
+      <span className="label">Choose your portrait</span>
       <div className="lobby__cosmetic-row">
         {FACES.map((f) => (
           <button

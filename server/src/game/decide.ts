@@ -86,7 +86,7 @@ function decideClient(
         return reject('wrong-phase', 'A race is underway — try again between rounds.');
       }
       if (room.players.length >= MAX_PLAYERS) {
-        return reject('room-full', 'This salon is at capacity.');
+        return reject('room-full', 'This room is full.');
       }
       const name = intent.playerName.trim();
       if (name.length === 0 || name.length > MAX_NAME_LENGTH) {
@@ -160,7 +160,7 @@ function decideClient(
 
     case 'game/playAgain': {
       if (!player) return reject('not-in-room', 'You are not in this room.');
-      if (!player.isHost) return reject('not-host', 'Only the host may reconvene the salon.');
+      if (!player.isHost) return reject('not-host', 'Only the host can start another round.');
       if (room.phase !== 'results') return reject('wrong-phase', 'The round is not over.');
       return { ok: true, events: [{ type: 'ReturnedToLobby', at }] };
     }

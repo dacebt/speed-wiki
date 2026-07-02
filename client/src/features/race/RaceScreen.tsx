@@ -36,7 +36,7 @@ export function RaceScreen() {
       message: {
         type: 'room/error',
         code: 'wrong-phase',
-        message: 'That path leads out of the Encyclopédie. Out of bounds.',
+        message: 'That link leads outside Wikipedia — out of bounds.',
       },
       receivedAt: Date.now(),
     });
@@ -71,16 +71,16 @@ export function RaceScreen() {
               <div className="panel panel--fleuron race__done-card">
                 {me.finishedRank !== null ? (
                   <>
-                    <h2 className="screen-title race__done-title">Enlightenment Achieved</h2>
+                    <h2 className="screen-title race__done-title">You reached the goal!</h2>
                     <p className="flavor">
-                      Thou hast reached <strong>{round.goalArticle}</strong> in {me.clicks} leaps —
-                      position {me.finishedRank}. The salon awaits the stragglers.
+                      You reached <strong>{round.goalArticle}</strong> in {me.clicks} clicks —
+                      position {me.finishedRank}. Now watch the stragglers catch up.
                     </p>
                   </>
                 ) : (
                   <>
-                    <h2 className="screen-title race__done-title">The Wager Is Conceded</h2>
-                    <p className="flavor">A dignified retreat. The salon murmurs approvingly.</p>
+                    <h2 className="screen-title race__done-title">You gave up</h2>
+                    <p className="flavor">A dignified retreat. No shame in it.</p>
                   </>
                 )}
               </div>
@@ -108,11 +108,11 @@ function WagerBoard({
     <aside className="race__board">
       <div className="panel race__cartouche">
         <div className="race__stat">
-          <span className="label">Leaps</span>
+          <span className="label">Clicks</span>
           <span className="race__stat-value">{myClicks}</span>
         </div>
         <div className="race__stat">
-          <span className="label">The Hour</span>
+          <span className="label">Time</span>
           <span className="race__stat-value race__stat-value--timer">
             <TimeLeft deadline={deadline} />
           </span>
@@ -120,7 +120,7 @@ function WagerBoard({
       </div>
 
       <div className="panel race__gossip">
-        <span className="label">The Wager Board</span>
+        <span className="label">Standings</span>
         <ul className="race__players">
           {ordered.map((p) => (
             <li key={p.id} className={`race__player ${p.id === you ? 'race__player--you' : ''}`}>
@@ -139,7 +139,7 @@ function WagerBoard({
       </div>
 
       <button className="btn btn--quiet race__giveup" onClick={() => sendIntent({ type: 'race/giveUp' })}>
-        Concede the Wager
+        Give Up
       </button>
     </aside>
   );
@@ -153,10 +153,10 @@ function compareProgress(a: PlayerView, b: PlayerView): number {
 }
 
 function playerStatus(p: PlayerView): string {
-  if (p.finishedRank !== null) return `arrived in ${p.clicks} leaps`;
-  if (p.gaveUp) return 'has withdrawn from the wager';
+  if (p.finishedRank !== null) return `arrived in ${p.clicks} clicks`;
+  if (p.gaveUp) return 'gave up';
   const current = p.path[p.path.length - 1];
-  return current ? `presently reading ${current}` : 'composing themselves';
+  return current ? `reading ${current}` : 'picking a starting point';
 }
 
 function ordinal(n: number): string {

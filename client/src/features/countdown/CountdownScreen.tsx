@@ -16,14 +16,14 @@ export function CountdownScreen() {
 
   const secondsLeft = Math.max(0, Math.ceil(((room.countdownEndsAt ?? 0) - now) / 1000));
   const flavor =
-    secondsLeft > 6 ? 'Powder thy wig…' : secondsLeft > 3 ? 'Dip thy quill…' : 'GO FORTH!';
+    secondsLeft > 6 ? 'Get ready…' : secondsLeft > 3 ? 'On your marks…' : 'GO!';
 
   return (
     <main className="countdown">
       <p className="flavor countdown__flavor">{flavor}</p>
       <div className="countdown__number">{secondsLeft}</div>
       <p className="flavor countdown__note">
-        The pages are being chosen. All race from the same start to the same truth.
+        The pages are being chosen. Everyone races from the same start to the same goal.
       </p>
       <div className="countdown__players">
         {room.players.map((p) => (

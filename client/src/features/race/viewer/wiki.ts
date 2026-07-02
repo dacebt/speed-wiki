@@ -17,7 +17,7 @@ export async function fetchArticle(title: string): Promise<FetchedArticle> {
   const res = await fetch(REST_HTML_BASE + encodeURIComponent(title.replaceAll(' ', '_')), {
     headers: { Accept: 'text/html' },
   });
-  if (res.status === 404) throw new Error(`No page in the Encyclopédie is titled “${title}”.`);
+  if (res.status === 404) throw new Error(`No Wikipedia page is titled “${title}”.`);
   if (!res.ok) throw new Error(`Wikipedia returned ${res.status}.`);
   const raw = await res.text();
   return { canonicalTitle: titleFromRestUrl(res.url) ?? title, html: sanitizeArticle(raw) };

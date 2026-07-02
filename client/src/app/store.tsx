@@ -47,7 +47,7 @@ export function reduce(state: AppState, event: AppEvent): AppState {
         you: null,
         room: null,
         clockOffset: 0,
-        notice: { code: 'disconnected', message: 'The connection to the salon was lost.' },
+        notice: { code: 'disconnected', message: 'Connection to the server was lost.' },
       };
     case 'server/message': {
       const { message } = event;

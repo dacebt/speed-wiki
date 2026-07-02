@@ -83,7 +83,7 @@ export function ArticlePane({ title, onArrived, onNavigate, onBlocked, frozen }:
       <h1 className="article-pane__title">{pane.loadedTitle ?? title}</h1>
       {/* Sanitized by DOMPurify in fetchArticle before it ever reaches state. */}
       <div className="article-pane__body" onClick={handleClick} dangerouslySetInnerHTML={{ __html: pane.html }} />
-      {pane.loading && <div className="article-pane__loading flavor">Turning the pages…</div>}
+      {pane.loading && <div className="article-pane__loading flavor">Loading article…</div>}
     </div>
   );
 }
