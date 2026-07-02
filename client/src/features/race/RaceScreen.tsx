@@ -9,7 +9,9 @@ import './race.css';
 export function RaceScreen() {
   const { room, you, clockOffset } = useAppState();
   const dispatch = useAppDispatch();
-  const [currentTitle, setCurrentTitle] = useState(() => room?.round?.startArticle ?? '');
+  // seq bumps on every navigate so re-clicking the same link after a failed
+  // fetch still changes ArticlePane's effect deps and retries the load.
+  const [nav, setNav] = useState(() => ({ title: room?.round?.startArticle ?? '', seq: 0 }));
   // Whether the next arrival is a hop to report (initial round load is not).
   const hopPendingRef = useRef(false);
 
@@ -21,7 +23,7 @@ export function RaceScreen() {
 
   function handleNavigate(title: string) {
     hopPendingRef.current = true;
-    setCurrentTitle(title);
+    setNav((n) => ({ title, seq: n.seq + 1 }));
   }
 
   function handleArrived(canonicalTitle: string) {
@@ -62,7 +64,8 @@ export function RaceScreen() {
 
         <div className="race__pane-wrap">
           <ArticlePane
-            title={currentTitle}
+            title={nav.title}
+            seq={nav.seq}
             onArrived={handleArrived}
             onNavigate={handleNavigate}
             onBlocked={handleBlocked}
