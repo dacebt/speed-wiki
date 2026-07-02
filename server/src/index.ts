@@ -13,6 +13,14 @@ import { parseClientIntent } from './shell/validate.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
+// Origins allowed to open a socket. Falls back to the Vite dev origin so local
+// `pnpm dev` needs no env; set CLIENT_ORIGIN (comma-separated for several) when
+// the client is deployed to a different origin than this server.
+const CLIENT_ORIGIN = (process.env.CLIENT_ORIGIN ?? 'http://localhost:5173')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter((origin) => origin.length > 0);
+
 const httpServer = createServer((req, res) => {
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -24,7 +32,7 @@ const httpServer = createServer((req, res) => {
 });
 
 const io = new Server(httpServer, {
-  cors: { origin: ['http://localhost:5173'] },
+  cors: { origin: CLIENT_ORIGIN },
 });
 
 io.on('connection', (socket: Socket) => {
