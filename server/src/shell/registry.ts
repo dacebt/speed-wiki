@@ -103,7 +103,8 @@ function clearTimers(runtime: RoomRuntime): void {
   runtime.roundTimer = null;
 }
 
-/** Effectful reactions to events: timer scheduling and article selection. */
+/** Effectful reactions to events: timer scheduling, article selection, and
+    dropping a kicked socket from the room. */
 function react(runtime: RoomRuntime, event: RoomEvent): void {
   switch (event.type) {
     case 'CountdownStarted': {
