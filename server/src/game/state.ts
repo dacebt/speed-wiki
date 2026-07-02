@@ -1,4 +1,4 @@
-import type { PlayerCosmetics, RoomPhase, RoomSync, RoundView } from '@wikispeedrun/shared';
+import type { PlayerCosmetics, RoomPhase, RoundView } from '@wikispeedrun/shared';
 
 // Internal room state, produced only by reducing events. The sync view sent
 // to clients is derived from it in view.ts.
