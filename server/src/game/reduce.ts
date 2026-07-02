@@ -56,6 +56,7 @@ export function reduce(room: CoreRoom, event: RoomEvent): CoreRoom {
           startedAt: event.startedAt,
           deadline: event.deadline,
         },
+        ranksAssigned: 0,
         players: room.players.map((p) => ({
           ...p,
           path: [event.startArticle],
@@ -73,11 +74,14 @@ export function reduce(room: CoreRoom, event: RoomEvent): CoreRoom {
       }));
 
     case 'PlayerFinished':
-      return updatePlayer(room, event.playerId, (p) => ({
-        ...p,
-        finishedRank: event.rank,
-        finishedAfterMs: event.afterMs,
-      }));
+      return {
+        ...updatePlayer(room, event.playerId, (p) => ({
+          ...p,
+          finishedRank: event.rank,
+          finishedAfterMs: event.afterMs,
+        })),
+        ranksAssigned: room.ranksAssigned + 1,
+      };
 
     case 'PlayerGaveUp':
       return updatePlayer(room, event.playerId, (p) => ({ ...p, gaveUp: true }));

@@ -7,7 +7,7 @@ import { ArticlePane } from './viewer/ArticlePane';
 import './race.css';
 
 export function RaceScreen() {
-  const { room, you } = useAppState();
+  const { room, you, clockOffset } = useAppState();
   const dispatch = useAppDispatch();
   const [currentTitle, setCurrentTitle] = useState(() => room?.round?.startArticle ?? '');
   // Whether the next arrival is a hop to report (initial round load is not).
@@ -32,19 +32,21 @@ export function RaceScreen() {
 
   function handleBlocked() {
     dispatch({
-      type: 'server/message',
-      message: {
-        type: 'room/error',
-        code: 'wrong-phase',
-        message: 'That link leads outside Wikipedia — out of bounds.',
-      },
-      receivedAt: Date.now(),
+      type: 'ui/notice',
+      code: 'wrong-phase',
+      message: 'That link leads outside Wikipedia — out of bounds.',
     });
   }
 
   return (
     <main className="race">
-      <WagerBoard players={room.players} you={you} deadline={round.deadline} myClicks={me.clicks} />
+      <WagerBoard
+        players={room.players}
+        you={you}
+        deadline={round.deadline}
+        myClicks={me.clicks}
+        clockOffset={clockOffset}
+      />
 
       <section className="race__stage">
         <header className="race__plate panel">
@@ -97,11 +99,13 @@ function WagerBoard({
   you,
   deadline,
   myClicks,
+  clockOffset,
 }: {
   players: PlayerView[];
   you: string | null;
   deadline: number;
   myClicks: number;
+  clockOffset: number;
 }) {
   const ordered = [...players].sort(compareProgress);
   return (
@@ -114,7 +118,7 @@ function WagerBoard({
         <div className="race__stat">
           <span className="label">Time</span>
           <span className="race__stat-value race__stat-value--timer">
-            <TimeLeft deadline={deadline} />
+            <TimeLeft deadline={deadline} clockOffset={clockOffset} />
           </span>
         </div>
       </div>
@@ -164,13 +168,13 @@ function ordinal(n: number): string {
   return `${n}${suffix}`;
 }
 
-function TimeLeft({ deadline }: { deadline: number }) {
+function TimeLeft({ deadline, clockOffset }: { deadline: number; clockOffset: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(timer);
   }, []);
-  const left = Math.max(0, deadline - now);
+  const left = Math.max(0, deadline - (now + clockOffset));
   const minutes = Math.floor(left / 60_000);
   const seconds = Math.floor((left % 60_000) / 1000);
   return <>{minutes}:{String(seconds).padStart(2, '0')}</>;

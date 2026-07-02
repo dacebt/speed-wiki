@@ -24,6 +24,7 @@ export interface CoreRoom {
   countdownEndsAt: number | null;
   pendingHardMode: boolean;
   roundsPlayed: number;
+  ranksAssigned: number;
 }
 
 export function initialRoom(code: string): CoreRoom {
@@ -35,6 +36,7 @@ export function initialRoom(code: string): CoreRoom {
     countdownEndsAt: null,
     pendingHardMode: false,
     roundsPlayed: 0,
+    ranksAssigned: 0,
   };
 }
 

@@ -26,7 +26,8 @@ export type AppEvent =
   | { type: 'socket/connected' }
   | { type: 'socket/disconnected' }
   | { type: 'server/message'; message: ServerMessage; receivedAt: number }
-  | { type: 'ui/dismissNotice' };
+  | { type: 'ui/dismissNotice' }
+  | { type: 'ui/notice'; code: ErrorCode; message: string };
 
 const initialState: AppState = {
   connected: false,
@@ -63,6 +64,8 @@ export function reduce(state: AppState, event: AppEvent): AppState {
     }
     case 'ui/dismissNotice':
       return { ...state, notice: null };
+    case 'ui/notice':
+      return { ...state, notice: { code: event.code, message: event.message } };
   }
 }
 

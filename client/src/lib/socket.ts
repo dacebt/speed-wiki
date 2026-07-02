@@ -45,6 +45,7 @@ function parseServerMessage(raw: unknown): ServerMessage | null {
     msg.type === 'room/sync' &&
     typeof msg.you === 'string' &&
     typeof msg.room === 'object' &&
+    msg.room !== null &&
     typeof msg.at === 'number'
   ) {
     return raw as ServerMessage;

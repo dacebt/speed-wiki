@@ -4,7 +4,7 @@ import { Avatar } from '../../components/Avatar';
 import './countdown.css';
 
 export function CountdownScreen() {
-  const { room } = useAppState();
+  const { room, clockOffset } = useAppState();
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -14,7 +14,10 @@ export function CountdownScreen() {
 
   if (!room) return null;
 
-  const secondsLeft = Math.max(0, Math.ceil(((room.countdownEndsAt ?? 0) - now) / 1000));
+  const secondsLeft = Math.max(
+    0,
+    Math.ceil(((room.countdownEndsAt ?? 0) - (now + clockOffset)) / 1000),
+  );
   const flavor =
     secondsLeft > 6 ? 'Get ready…' : secondsLeft > 3 ? 'On your marks…' : 'GO!';
 

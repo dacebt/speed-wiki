@@ -131,9 +131,10 @@ function decideClient(
         { type: 'HopMade', playerId, article: intent.article, at },
       ];
       if (sameArticle(intent.article, room.round.goalArticle)) {
-        // Monotonic: highest rank assigned so far + 1, so a finisher leaving
-        // the room cannot cause a later finisher to receive a duplicate rank.
-        const rank = Math.max(0, ...room.players.map((p) => p.finishedRank ?? 0)) + 1;
+        // Drawn from a monotonic per-round counter (not a max over currently
+        // present players), so a finisher leaving the room cannot cause a
+        // later finisher to reuse a rank.
+        const rank = room.ranksAssigned + 1;
         events.push({
           type: 'PlayerFinished',
           playerId,
