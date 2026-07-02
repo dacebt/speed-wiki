@@ -1,7 +1,6 @@
 import {
   isValidCosmetics,
   MAX_NAME_LENGTH,
-  MAX_PLAYERS,
   type ClientIntent,
   type ErrorCode,
 } from '@wikispeedrun/shared';
@@ -84,9 +83,6 @@ function decideClient(
     case 'room/join': {
       if (room.phase !== 'lobby' && room.phase !== 'results') {
         return reject('wrong-phase', 'A race is underway — try again between rounds.');
-      }
-      if (room.players.length >= MAX_PLAYERS) {
-        return reject('room-full', 'This room is full.');
       }
       const name = intent.playerName.trim();
       if (name.length === 0 || name.length > MAX_NAME_LENGTH) {

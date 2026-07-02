@@ -1,4 +1,4 @@
-import { FACES, HATS, MAX_PLAYERS, type PlayerView } from '@wikispeedrun/shared';
+import { FACES, HATS, type PlayerView } from '@wikispeedrun/shared';
 import { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../../app/store';
 import { Avatar } from '../../components/Avatar';
@@ -47,7 +47,7 @@ export function LobbyScreen() {
 
       <section className="panel panel--fleuron lobby__players">
         <span className="label">
-          {room.players.length} of {MAX_PLAYERS} players
+          {room.players.length} {room.players.length === 1 ? 'player' : 'players'}
         </span>
         <ul className="lobby__list">
           {room.players.map((p) => (

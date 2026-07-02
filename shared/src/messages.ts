@@ -15,7 +15,6 @@ export type ClientIntent =
 
 export type ErrorCode =
   | 'room-not-found'
-  | 'room-full'
   | 'invalid-name'
   | 'invalid-cosmetics'
   | 'not-host'

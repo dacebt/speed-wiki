@@ -47,6 +47,5 @@ export interface RoomSync {
   countdownEndsAt: number | null;
 }
 
-export const MAX_PLAYERS = 8;
 export const MAX_NAME_LENGTH = 20;
 export const ROOM_CODE_LENGTH = 4;
