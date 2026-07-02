@@ -1,0 +1,14 @@
+{
+  "name": "wikispeedrun",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,magenta \"pnpm --filter server dev\" \"pnpm --filter client dev\"",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3",
+    "typescript": "~6.0.3"
+  }
+}
