@@ -22,7 +22,12 @@
 
 .results__table { width: 100%; border-collapse: collapse; }
 
-.results__table th { text-align: left; padding: 6px 12px; }
+.results__table th {
+  display: table-cell;
+  text-align: left;
+  padding: 6px 12px;
+  margin: 0;
+}
 
 .results__table td {
   padding: 10px 12px;
