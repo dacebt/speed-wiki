@@ -14,7 +14,7 @@ export type ClientIntent =
   | { type: 'game/playAgain' }
   | { type: 'room/kick'; playerId: string };
 
-// Listed at runtime so both boundaries can check membership; the ErrorCode
+// Listed at runtime so the client boundary can check membership; the ErrorCode
 // type is derived from this list, keeping it the single source of truth.
 export const ERROR_CODES = [
   'room-not-found',
