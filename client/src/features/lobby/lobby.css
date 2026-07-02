@@ -20,6 +20,29 @@
 
 .lobby__hint { font-size: 13px; }
 
+/* The wax seal doubles as the copy-code button — keep the seal visual, add
+   the affordance cues (pointer, hover glow, focus ring). */
+.seal--button {
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: box-shadow var(--speed-quick), transform var(--speed-quick);
+}
+
+.seal--button:hover {
+  box-shadow:
+    inset 0 -4px 10px rgba(0, 0, 0, 0.35),
+    0 0 16px rgba(232, 197, 90, 0.4);
+  transform: translateY(-1px);
+}
+
+.seal--button:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 3px;
+}
+
+.lobby__copy-link { margin-top: 4px; }
+
 .lobby__players, .lobby__cosmetics { width: min(560px, 92vw); }
 
 .lobby__list {

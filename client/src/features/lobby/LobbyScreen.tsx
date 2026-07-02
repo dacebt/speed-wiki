@@ -1,5 +1,5 @@
 import { FACES, HATS, MAX_PLAYERS, type PlayerView } from '@wikispeedrun/shared';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useAppState } from '../../app/store';
 import { Avatar } from '../../components/Avatar';
 import { sendIntent } from '../../lib/socket';
@@ -8,11 +8,14 @@ import './lobby.css';
 export function LobbyScreen() {
   const { room, you } = useAppState();
   const [hardMode, setHardMode] = useState(false);
+  const codeCopy = useCopyFeedback();
+  const linkCopy = useCopyFeedback();
   if (!room) return null;
 
   const me = room.players.find((p) => p.id === you);
   const isHost = me?.isHost ?? false;
   const hasScores = room.players.some((p) => p.score > 0);
+  const inviteUrl = `${window.location.origin}/?code=${room.code}`;
 
   return (
     <main className="lobby">
@@ -20,8 +23,25 @@ export function LobbyScreen() {
         <h1 className="screen-title lobby__title">Lobby</h1>
         <div className="lobby__seal-wrap">
           <span className="label">Room Code</span>
-          <span className="seal">{room.code}</span>
-          <span className="flavor lobby__hint">Share this code with your friends.</span>
+          <button
+            type="button"
+            className="seal seal--button"
+            onClick={() => codeCopy.copy(room.code)}
+            title="Copy room code"
+            aria-label={`Copy room code ${room.code}`}
+          >
+            {room.code}
+          </button>
+          <span className="flavor lobby__hint" aria-live="polite">
+            {codeCopy.copied ? 'Copied!' : '⧉ Click the seal to copy the code'}
+          </span>
+          <button
+            type="button"
+            className="btn btn--quiet lobby__copy-link"
+            onClick={() => linkCopy.copy(inviteUrl)}
+          >
+            {linkCopy.copied ? 'Copied' : 'Copy invite link'}
+          </button>
         </div>
       </header>
 
@@ -64,6 +84,27 @@ export function LobbyScreen() {
       </section>
     </main>
   );
+}
+
+// Copy-to-clipboard with a brief "Copied" flash. On failure (API absent or
+// permission denied) the copy is a no-op — the code stays selectable text, so
+// there is nothing to crash and nothing to recover from.
+function useCopyFeedback() {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable or denied; the value remains selectable.
+    }
+  }
+
+  return { copied, copy };
 }
 
 function PlayerCard({

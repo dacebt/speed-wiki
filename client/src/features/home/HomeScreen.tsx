@@ -1,13 +1,37 @@
 import { MAX_NAME_LENGTH, ROOM_CODE_LENGTH } from '@wikispeedrun/shared';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { sendIntent } from '../../lib/socket';
 import './home.css';
 
 const NAME_STORAGE_KEY = 'wikispeedrun.playerName';
 
+/** Read a `?code=` invite param, normalized to the room-code shape. */
+function readCodeParam(): string {
+  const raw = new URLSearchParams(window.location.search).get('code') ?? '';
+  return raw.trim().toUpperCase().slice(0, ROOM_CODE_LENGTH);
+}
+
 export function HomeScreen() {
   const [name, setName] = useState(() => localStorage.getItem(NAME_STORAGE_KEY) ?? '');
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(readCodeParam);
+
+  // Consume the invite param once: strip it so a refresh doesn't re-join, and
+  // auto-join when a remembered name and a full code are both present. A dead
+  // code degrades to the normal room-not-found toast; an empty name never joins.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('code')) return;
+    const invited = readCodeParam();
+    params.delete('code');
+    const qs = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
+
+    const remembered = (localStorage.getItem(NAME_STORAGE_KEY) ?? '').trim();
+    const nameValid = remembered.length > 0 && remembered.length <= MAX_NAME_LENGTH;
+    if (nameValid && invited.length === ROOM_CODE_LENGTH) {
+      sendIntent({ type: 'room/join', code: invited, playerName: remembered });
+    }
+  }, []);
 
   const trimmedName = name.trim();
   const nameOk = trimmedName.length > 0 && trimmedName.length <= MAX_NAME_LENGTH;
