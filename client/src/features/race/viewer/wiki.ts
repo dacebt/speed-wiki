@@ -24,7 +24,9 @@ export async function fetchArticle(title: string): Promise<FetchedArticle> {
 }
 
 function titleFromRestUrl(url: string): string | null {
-  const match = /\/page\/html\/([^?#]+)/.exec(url);
+  // Two URL shapes: the request URL (/api/rest_v1/page/html/<title>) and the
+  // URL redirect titles resolve to (/w/rest.php/v1/page/<title>/html).
+  const match = /\/page\/html\/([^?#/]+)/.exec(url) ?? /\/v1\/page\/([^?#/]+)\/html/.exec(url);
   if (!match?.[1]) return null;
   try {
     return decodeURIComponent(match[1]).replaceAll('_', ' ');
@@ -66,11 +68,13 @@ export type LinkTarget =
 
 export function classifyLink(anchor: HTMLAnchorElement): LinkTarget {
   const href = anchor.getAttribute('href') ?? '';
-  const rel = anchor.getAttribute('rel') ?? '';
 
   if (href.startsWith('#')) return { kind: 'fragment', targetId: href.slice(1) };
 
-  if (rel.includes('mw:WikiLink') || href.startsWith('./')) {
+  // Only relative './Title' hrefs are same-wiki articles. Interwiki links
+  // (Wiktionary, Commons, …) also carry rel="mw:WikiLink/Interwiki" but use
+  // absolute URLs — those are out of bounds.
+  if (href.startsWith('./')) {
     let title: string;
     try {
       title = decodeURIComponent(href.replace(/^\.\//, '').split('#')[0] ?? '');
