@@ -6,6 +6,7 @@ import type { PlayerCosmetics } from '@wikispeedrun/shared';
 export type RoomEvent =
   | { type: 'PlayerJoined'; playerId: string; name: string; at: number }
   | { type: 'PlayerLeft'; playerId: string; at: number }
+  | { type: 'PlayerKicked'; playerId: string; at: number }
   | { type: 'CosmeticsSet'; playerId: string; cosmetics: PlayerCosmetics; at: number }
   | { type: 'CountdownStarted'; endsAt: number; hardMode: boolean; at: number }
   | {

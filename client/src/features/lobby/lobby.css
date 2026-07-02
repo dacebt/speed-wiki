@@ -70,6 +70,24 @@
 
 .lobby__host { margin: 0; color: var(--gold-bright); }
 
+.lobby__kick {
+  margin-left: auto;
+  align-self: flex-start;
+  font-size: 12px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--gold-dim);
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: box-shadow var(--speed-quick), color var(--speed-quick);
+}
+
+.lobby__kick:hover {
+  color: var(--gold-bright);
+  box-shadow: var(--glow-hover);
+}
+
 .lobby__score { font-size: 13px; color: var(--gold); }
 
 .lobby__cosmetic-row {

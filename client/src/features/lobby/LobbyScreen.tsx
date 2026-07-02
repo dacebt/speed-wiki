@@ -51,7 +51,13 @@ export function LobbyScreen() {
         </span>
         <ul className="lobby__list">
           {room.players.map((p) => (
-            <PlayerCard key={p.id} player={p} isYou={p.id === you} showScore={hasScores} />
+            <PlayerCard
+              key={p.id}
+              player={p}
+              isYou={p.id === you}
+              showScore={hasScores}
+              canKick={isHost && p.id !== you}
+            />
           ))}
         </ul>
       </section>
@@ -113,10 +119,12 @@ function PlayerCard({
   player,
   isYou,
   showScore,
+  canKick,
 }: {
   player: PlayerView;
   isYou: boolean;
   showScore: boolean;
+  canKick: boolean;
 }) {
   return (
     <li className="lobby__player">
@@ -129,6 +137,15 @@ function PlayerCard({
         {player.isHost && <span className="label lobby__host">Host</span>}
         {showScore && <span className="lobby__score">{player.score} points</span>}
       </div>
+      {canKick && (
+        <button
+          className="lobby__kick"
+          aria-label={`Remove ${player.name}`}
+          onClick={() => sendIntent({ type: 'room/kick', playerId: player.id })}
+        >
+          Remove
+        </button>
+      )}
     </li>
   );
 }

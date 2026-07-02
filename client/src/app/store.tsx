@@ -58,6 +58,20 @@ export function reduce(state: AppState, event: AppEvent): AppState {
           room: message.room,
           you: message.you,
           clockOffset: message.at - event.receivedAt,
+          // Entering a room from Home supersedes any lingering transient toast
+          // (e.g. the removal notice when a kicked player rejoins). Notices
+          // raised while already in a room — like the out-of-bounds warning —
+          // are left alone, since a full-state sync arrives on every change.
+          notice: state.room === null ? null : state.notice,
+        };
+      }
+      // Being kicked ends our membership: clear room state and land on Home,
+      // the same reset a disconnect performs, with the removal notice.
+      if (message.code === 'kicked') {
+        return {
+          ...initialState,
+          connected: state.connected,
+          notice: { code: message.code, message: message.message },
         };
       }
       return { ...state, notice: { code: message.code, message: message.message } };

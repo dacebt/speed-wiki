@@ -131,6 +131,22 @@ function react(runtime: RoomRuntime, event: RoomEvent): void {
       }, Math.max(0, event.deadline - Date.now()));
       break;
     }
+    case 'PlayerKicked': {
+      // Kick is not disconnect: the socket stays connected but leaves the room.
+      // Tell it it was removed and drop it from members before the broadcast so
+      // the room's syncs no longer reach it.
+      const socket = runtime.members.get(event.playerId);
+      if (socket) {
+        send(socket, {
+          type: 'room/error',
+          code: 'kicked',
+          message: 'You were removed from the room.',
+        });
+        runtime.members.delete(event.playerId);
+        delete socket.data.roomCode;
+      }
+      break;
+    }
     case 'RoundEnded':
     case 'ReturnedToLobby':
       clearTimers(runtime);

@@ -11,7 +11,8 @@ export type ClientIntent =
   | { type: 'game/start'; hardMode: boolean }
   | { type: 'race/hop'; article: string }
   | { type: 'race/giveUp' }
-  | { type: 'game/playAgain' };
+  | { type: 'game/playAgain' }
+  | { type: 'room/kick'; playerId: string };
 
 export type ErrorCode =
   | 'room-not-found'
@@ -20,7 +21,10 @@ export type ErrorCode =
   | 'not-host'
   | 'not-in-room'
   | 'wrong-phase'
-  | 'article-fetch-failed';
+  | 'article-fetch-failed'
+  /** Sent to a player the host removed from the lobby; the client clears its
+      room and returns to Home. */
+  | 'kicked';
 
 export type ServerMessage =
   /** `at` is the server clock at send time — clients derive a clock offset

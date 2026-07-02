@@ -32,6 +32,11 @@ export function reduce(room: CoreRoom, event: RoomEvent): CoreRoom {
       return { ...room, players };
     }
 
+    case 'PlayerKicked':
+      // The host can never kick themselves (decide guards it), so no
+      // host-transfer is possible here — a plain removal.
+      return { ...room, players: room.players.filter((p) => p.id !== event.playerId) };
+
     case 'CosmeticsSet':
       return updatePlayer(room, event.playerId, (p) => ({ ...p, cosmetics: event.cosmetics }));
 

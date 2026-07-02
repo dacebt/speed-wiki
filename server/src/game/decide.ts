@@ -161,6 +161,19 @@ function decideClient(
       if (room.phase !== 'results') return reject('wrong-phase', 'The round is not over.');
       return { ok: true, events: [{ type: 'ReturnedToLobby', at }] };
     }
+
+    case 'room/kick': {
+      if (!player) return reject('not-in-room', 'You are not in this room.');
+      if (!player.isHost) return reject('not-host', 'Only the host may remove players.');
+      if (room.phase !== 'lobby') {
+        return reject('wrong-phase', 'Players can only be removed from the lobby.');
+      }
+      // A valid target is another player in the room — this rejects both an
+      // unknown id and the host trying to remove themselves.
+      const target = room.players.find((p) => p.id === intent.playerId && p.id !== playerId);
+      if (!target) return reject('not-in-room', 'No such player to remove.');
+      return { ok: true, events: [{ type: 'PlayerKicked', playerId: target.id, at }] };
+    }
   }
 }
 

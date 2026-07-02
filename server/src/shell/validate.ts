@@ -34,6 +34,10 @@ export function parseClientIntent(raw: unknown): ClientIntent | null {
         : null;
     case 'race/giveUp':
       return { type: 'race/giveUp' };
+    case 'room/kick':
+      return typeof msg.playerId === 'string'
+        ? { type: 'room/kick', playerId: msg.playerId }
+        : null;
     case 'game/playAgain':
       return { type: 'game/playAgain' };
     default:
