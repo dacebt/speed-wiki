@@ -12,9 +12,10 @@ import {
 // Boundary validation for server→client messages. Socket bytes are untrusted
 // until they structurally match a known message, so the store only ever sees a
 // well-formed ServerMessage. The guards mirror the wire types in shared/ (the
-// single source of truth): retyping or removing a shared field stops these
-// guards typechecking, so the mirror is caught drifting at build time — adding
-// a field is the one direction that must be mirrored here by hand. Validation
+// single source of truth) but are fully hand-maintained: they run over
+// `unknown`, so TypeScript does not check them against the shared types and no
+// drift — added, removed, or retyped fields — is caught at build time. Any
+// change to a wire type in shared/ must be mirrored here by hand. Validation
 // is shape-only — domain legality (e.g. whether a cosmetic id is in the
 // catalog) is the server's authority.
 
