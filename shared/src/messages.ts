@@ -14,17 +14,22 @@ export type ClientIntent =
   | { type: 'game/playAgain' }
   | { type: 'room/kick'; playerId: string };
 
-export type ErrorCode =
-  | 'room-not-found'
-  | 'invalid-name'
-  | 'invalid-cosmetics'
-  | 'not-host'
-  | 'not-in-room'
-  | 'wrong-phase'
-  | 'article-fetch-failed'
+// Listed at runtime so both boundaries can check membership; the ErrorCode
+// type is derived from this list, keeping it the single source of truth.
+export const ERROR_CODES = [
+  'room-not-found',
+  'invalid-name',
+  'invalid-cosmetics',
+  'not-host',
+  'not-in-room',
+  'wrong-phase',
+  'article-fetch-failed',
   /** Sent to a player the host removed from the lobby; the client clears its
       room and returns to Home. */
-  | 'kicked';
+  'kicked',
+] as const;
+
+export type ErrorCode = (typeof ERROR_CODES)[number];
 
 export type ServerMessage =
   /** `at` is the server clock at send time — clients derive a clock offset

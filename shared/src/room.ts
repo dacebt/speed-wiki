@@ -3,7 +3,11 @@ import type { PlayerCosmetics } from './cosmetics.js';
 // The full room state the server broadcasts on every change. Clients render
 // this and nothing else — no client-side authority.
 
-export type RoomPhase = 'lobby' | 'countdown' | 'racing' | 'results';
+// Listed at runtime so the client boundary can check membership; the RoomPhase
+// type is derived from this list, keeping it the single source of truth.
+export const ROOM_PHASES = ['lobby', 'countdown', 'racing', 'results'] as const;
+
+export type RoomPhase = (typeof ROOM_PHASES)[number];
 
 export interface PlayerView {
   id: string;
