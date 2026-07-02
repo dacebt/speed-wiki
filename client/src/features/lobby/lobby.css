@@ -7,9 +7,14 @@
   padding: 40px 24px;
 }
 
-.lobby__header { text-align: center; }
+.lobby__header {
+  text-align: center;
+}
 
-.lobby__title { font-size: 34px; margin-bottom: 14px; }
+.lobby__title {
+  font-size: 34px;
+  margin-bottom: 14px;
+}
 
 .lobby__seal-wrap {
   display: flex;
@@ -18,7 +23,9 @@
   gap: 6px;
 }
 
-.lobby__hint { font-size: 13px; }
+.lobby__hint {
+  font-size: 13px;
+}
 
 /* The wax seal doubles as the copy-code button — keep the seal visual, add
    the affordance cues (pointer, hover glow, focus ring). */
@@ -26,7 +33,9 @@
   border: none;
   padding: 0;
   cursor: pointer;
-  transition: box-shadow var(--speed-quick), transform var(--speed-quick);
+  transition:
+    box-shadow var(--speed-quick),
+    transform var(--speed-quick);
 }
 
 .seal--button:hover {
@@ -41,9 +50,14 @@
   outline-offset: 3px;
 }
 
-.lobby__copy-link { margin-top: 4px; }
+.lobby__copy-link {
+  margin-top: 4px;
+}
 
-.lobby__players, .lobby__cosmetics { width: min(560px, 92vw); }
+.lobby__players,
+.lobby__cosmetics {
+  width: min(560px, 92vw);
+}
 
 .lobby__list {
   list-style: none;
@@ -64,11 +78,19 @@
   padding: 10px 12px;
 }
 
-.lobby__player-info { display: flex; flex-direction: column; }
+.lobby__player-info {
+  display: flex;
+  flex-direction: column;
+}
 
-.lobby__player-name { font-weight: 600; }
+.lobby__player-name {
+  font-weight: 600;
+}
 
-.lobby__host { margin: 0; color: var(--gold-bright); }
+.lobby__host {
+  margin: 0;
+  color: var(--gold-bright);
+}
 
 .lobby__kick {
   margin-left: auto;
@@ -80,7 +102,9 @@
   border-radius: 4px;
   color: var(--muted);
   cursor: pointer;
-  transition: box-shadow var(--speed-quick), color var(--speed-quick);
+  transition:
+    box-shadow var(--speed-quick),
+    color var(--speed-quick);
 }
 
 .lobby__kick:hover {
@@ -88,7 +112,10 @@
   box-shadow: var(--glow-hover);
 }
 
-.lobby__score { font-size: 13px; color: var(--gold); }
+.lobby__score {
+  font-size: 13px;
+  color: var(--gold);
+}
 
 .lobby__cosmetic-row {
   display: flex;
@@ -112,7 +139,9 @@
   transition: box-shadow var(--speed-quick);
 }
 
-.lobby__swatch:hover { box-shadow: var(--glow-hover); }
+.lobby__swatch:hover {
+  box-shadow: var(--glow-hover);
+}
 
 .lobby__swatch--active {
   border-color: var(--gold-bright);
@@ -135,4 +164,7 @@
   font-size: 14px;
 }
 
-.lobby__start { font-size: 17px; padding: 14px 30px; }
+.lobby__start {
+  font-size: 17px;
+  padding: 14px 30px;
+}

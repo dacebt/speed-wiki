@@ -74,7 +74,8 @@ export function LobbyScreen() {
                 onChange={(e) => setHardMode(e.target.checked)}
               />
               <span>
-                Hard mode <span className="flavor">— truly random pages, may the odds be ever grim</span>
+                Hard mode{' '}
+                <span className="flavor">— truly random pages, may the odds be ever grim</span>
               </span>
             </label>
             <button

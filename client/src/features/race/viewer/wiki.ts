@@ -62,9 +62,7 @@ const BLOCKED_NAMESPACES =
   /^(File|Category|Help|Wikipedia|Special|Talk|Portal|Template|Template talk|Draft|Module|MediaWiki):/i;
 
 export type LinkTarget =
-  | { kind: 'fragment'; targetId: string }
-  | { kind: 'article'; title: string }
-  | { kind: 'blocked' };
+  { kind: 'fragment'; targetId: string } | { kind: 'article'; title: string } | { kind: 'blocked' };
 
 export function classifyLink(anchor: HTMLAnchorElement): LinkTarget {
   const href = anchor.getAttribute('href') ?? '';

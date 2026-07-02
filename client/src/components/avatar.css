@@ -10,11 +10,25 @@
   flex-shrink: 0;
 }
 
-.avatar--sm { width: 34px; height: 40px; font-size: 20px; }
-.avatar--md { width: 52px; height: 62px; font-size: 32px; }
-.avatar--lg { width: 76px; height: 90px; font-size: 48px; }
+.avatar--sm {
+  width: 34px;
+  height: 40px;
+  font-size: 20px;
+}
+.avatar--md {
+  width: 52px;
+  height: 62px;
+  font-size: 32px;
+}
+.avatar--lg {
+  width: 76px;
+  height: 90px;
+  font-size: 48px;
+}
 
-.avatar__face { line-height: 1; }
+.avatar__face {
+  line-height: 1;
+}
 
 .avatar__hat {
   position: absolute;

@@ -131,7 +131,9 @@ function WagerBoard({
               <Avatar cosmetics={p.cosmetics} size="sm" />
               <div className="race__player-info">
                 <span className="race__player-name">
-                  {p.finishedRank !== null && <span className="race__medal">🕯️ {ordinal(p.finishedRank)}</span>}{' '}
+                  {p.finishedRank !== null && (
+                    <span className="race__medal">🕯️ {ordinal(p.finishedRank)}</span>
+                  )}{' '}
                   {p.name}
                 </span>
                 <span className="flavor race__player-status">{playerStatus(p)}</span>
@@ -142,7 +144,10 @@ function WagerBoard({
         </ul>
       </div>
 
-      <button className="btn btn--quiet race__giveup" onClick={() => sendIntent({ type: 'race/giveUp' })}>
+      <button
+        className="btn btn--quiet race__giveup"
+        onClick={() => sendIntent({ type: 'race/giveUp' })}
+      >
         Give Up
       </button>
     </aside>
@@ -177,5 +182,9 @@ function TimeLeft({ deadline, clockOffset }: { deadline: number; clockOffset: nu
   const left = Math.max(0, deadline - (now + clockOffset));
   const minutes = Math.floor(left / 60_000);
   const seconds = Math.floor((left % 60_000) / 1000);
-  return <>{minutes}:{String(seconds).padStart(2, '0')}</>;
+  return (
+    <>
+      {minutes}:{String(seconds).padStart(2, '0')}
+    </>
+  );
 }

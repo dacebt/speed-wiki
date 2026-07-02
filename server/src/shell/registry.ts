@@ -111,25 +111,31 @@ function react(runtime: RoomRuntime, event: RoomEvent): void {
       // Pick the articles while the countdown runs; the round starts when
       // both the timer and the pick have completed.
       const articles = pickPair(event.hardMode);
-      runtime.countdownTimer = setTimeout(() => {
-        runtime.countdownTimer = null;
-        void articles.then((pair) => {
-          if (!rooms.has(runtime.state.code)) return;
-          dispatch(runtime, {
-            kind: 'sys/countdownFinished',
-            startArticle: pair.startArticle,
-            goalArticle: pair.goalArticle,
-            at: Date.now(),
+      runtime.countdownTimer = setTimeout(
+        () => {
+          runtime.countdownTimer = null;
+          void articles.then((pair) => {
+            if (!rooms.has(runtime.state.code)) return;
+            dispatch(runtime, {
+              kind: 'sys/countdownFinished',
+              startArticle: pair.startArticle,
+              goalArticle: pair.goalArticle,
+              at: Date.now(),
+            });
           });
-        });
-      }, Math.max(0, event.endsAt - Date.now()));
+        },
+        Math.max(0, event.endsAt - Date.now()),
+      );
       break;
     }
     case 'RoundStarted': {
-      runtime.roundTimer = setTimeout(() => {
-        runtime.roundTimer = null;
-        dispatch(runtime, { kind: 'sys/roundTimedOut', at: Date.now() });
-      }, Math.max(0, event.deadline - Date.now()));
+      runtime.roundTimer = setTimeout(
+        () => {
+          runtime.roundTimer = null;
+          dispatch(runtime, { kind: 'sys/roundTimedOut', at: Date.now() });
+        },
+        Math.max(0, event.deadline - Date.now()),
+      );
       break;
     }
     case 'PlayerKicked': {

@@ -16,9 +16,16 @@
   min-height: 0;
 }
 
-.race__cartouche { display: flex; gap: 20px; padding: 14px 18px; }
+.race__cartouche {
+  display: flex;
+  gap: 20px;
+  padding: 14px 18px;
+}
 
-.race__stat { display: flex; flex-direction: column; }
+.race__stat {
+  display: flex;
+  flex-direction: column;
+}
 
 .race__stat-value {
   font-size: 26px;
@@ -26,7 +33,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-.race__stat-value--timer { color: var(--gold-bright); }
+.race__stat-value--timer {
+  color: var(--gold-bright);
+}
 
 .race__gossip {
   flex: 1;
@@ -55,13 +64,25 @@
   transition: order var(--speed-reorder);
 }
 
-.race__player--you { border-color: var(--gold-dim); }
+.race__player--you {
+  border-color: var(--gold-dim);
+}
 
-.race__player-info { flex: 1; min-width: 0; }
+.race__player-info {
+  flex: 1;
+  min-width: 0;
+}
 
-.race__player-name { font-weight: 600; font-size: 14px; display: block; }
+.race__player-name {
+  font-weight: 600;
+  font-size: 14px;
+  display: block;
+}
 
-.race__medal { color: var(--gold-bright); font-size: 12px; }
+.race__medal {
+  color: var(--gold-bright);
+  font-size: 12px;
+}
 
 .race__player-status {
   font-size: 12px;
@@ -77,7 +98,9 @@
   font-weight: 600;
 }
 
-.race__giveup { width: 100%; }
+.race__giveup {
+  width: 100%;
+}
 
 /* ── Stage (header plate + folio) ──────────────────────────────── */
 
@@ -90,7 +113,9 @@
   min-height: 0;
 }
 
-.race__plate { padding: 12px 20px; }
+.race__plate {
+  padding: 12px 20px;
+}
 
 .race__route {
   display: flex;
@@ -99,7 +124,9 @@
   flex-wrap: wrap;
 }
 
-.race__route-label { margin: 0; }
+.race__route-label {
+  margin: 0;
+}
 
 .race__route-title {
   font-family: var(--font-display);
@@ -112,7 +139,10 @@
   border-bottom: 2px solid var(--gold);
 }
 
-.race__manicule { color: var(--gold); font-size: 20px; }
+.race__manicule {
+  color: var(--gold);
+  font-size: 20px;
+}
 
 .race__trail {
   margin-top: 4px;
@@ -141,6 +171,13 @@
   border-radius: 4px;
 }
 
-.race__done-card { max-width: 440px; text-align: center; }
+.race__done-card {
+  max-width: 440px;
+  text-align: center;
+}
 
-.race__done-title { font-size: 26px; color: var(--gold-bright); margin-bottom: 8px; }
+.race__done-title {
+  font-size: 26px;
+  color: var(--gold-bright);
+  margin-bottom: 8px;
+}

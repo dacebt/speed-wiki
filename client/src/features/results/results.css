@@ -7,7 +7,9 @@
   padding: 48px 24px;
 }
 
-.results__header { text-align: center; }
+.results__header {
+  text-align: center;
+}
 
 .results__title {
   font-size: 40px;
@@ -16,11 +18,20 @@
   margin-top: 8px;
 }
 
-.results__proclamation { font-size: 17px; margin-top: 8px; }
+.results__proclamation {
+  font-size: 17px;
+  margin-top: 8px;
+}
 
-.results__table-wrap { width: min(780px, 94vw); overflow-x: auto; }
+.results__table-wrap {
+  width: min(780px, 94vw);
+  overflow-x: auto;
+}
 
-.results__table { width: 100%; border-collapse: collapse; }
+.results__table {
+  width: 100%;
+  border-collapse: collapse;
+}
 
 .results__table th {
   display: table-cell;
@@ -35,13 +46,25 @@
   vertical-align: middle;
 }
 
-.results__row--you { background: rgba(201, 162, 39, 0.07); }
+.results__row--you {
+  background: rgba(201, 162, 39, 0.07);
+}
 
-.results__standing { font-weight: 600; white-space: nowrap; }
+.results__standing {
+  font-weight: 600;
+  white-space: nowrap;
+}
 
-.results__player { display: flex; align-items: center; gap: 10px; }
+.results__player {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 
-.results__name { font-weight: 600; display: block; }
+.results__name {
+  font-weight: 600;
+  display: block;
+}
 
 .results__path {
   font-size: 12px;
@@ -52,7 +75,10 @@
   text-overflow: ellipsis;
 }
 
-.results__points { color: var(--sage); font-weight: 600; }
+.results__points {
+  color: var(--sage);
+  font-weight: 600;
+}
 
 .results__fortune {
   color: var(--gold-bright);
@@ -60,4 +86,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.results__again { font-size: 17px; padding: 14px 30px; }
+.results__again {
+  font-size: 17px;
+  padding: 14px 30px;
+}

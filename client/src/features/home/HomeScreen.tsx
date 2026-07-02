@@ -63,7 +63,9 @@ export function HomeScreen() {
       </header>
 
       <div className="panel panel--fleuron home__card">
-        <label className="label" htmlFor="player-name">Your name</label>
+        <label className="label" htmlFor="player-name">
+          Your name
+        </label>
         <input
           id="player-name"
           className="input"

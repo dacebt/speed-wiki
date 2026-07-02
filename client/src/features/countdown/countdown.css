@@ -7,7 +7,10 @@
   gap: 18px;
 }
 
-.countdown__flavor { font-size: 22px; color: var(--gold-bright); }
+.countdown__flavor {
+  font-size: 22px;
+  color: var(--gold-bright);
+}
 
 .countdown__number {
   font-family: var(--font-display);
@@ -18,7 +21,9 @@
   text-shadow: 0 0 60px rgba(232, 197, 90, 0.4);
 }
 
-.countdown__note { font-size: 15px; }
+.countdown__note {
+  font-size: 15px;
+}
 
 .countdown__players {
   display: flex;

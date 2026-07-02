@@ -15,7 +15,9 @@ export function ResultsScreen() {
   return (
     <main className="results">
       <header className="results__header">
-        <span className="label">Round {room.round.roundNumber} — {room.round.startArticle} ☞ {room.round.goalArticle}</span>
+        <span className="label">
+          Round {room.round.roundNumber} — {room.round.startArticle} ☞ {room.round.goalArticle}
+        </span>
         <h1 className="screen-title results__title">
           {winner ? 'Enlightenment Achieved' : "Time's Up"}
         </h1>
@@ -64,7 +66,10 @@ export function ResultsScreen() {
       </section>
 
       {me?.isHost ? (
-        <button className="btn btn--primary results__again" onClick={() => sendIntent({ type: 'game/playAgain' })}>
+        <button
+          className="btn btn--primary results__again"
+          onClick={() => sendIntent({ type: 'game/playAgain' })}
+        >
           Play Again
         </button>
       ) : (

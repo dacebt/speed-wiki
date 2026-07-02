@@ -18,8 +18,7 @@ export function CountdownScreen() {
     0,
     Math.ceil(((room.countdownEndsAt ?? 0) - (now + clockOffset)) / 1000),
   );
-  const flavor =
-    secondsLeft > 6 ? 'Get ready…' : secondsLeft > 3 ? 'On your marks…' : 'GO!';
+  const flavor = secondsLeft > 6 ? 'Get ready…' : secondsLeft > 3 ? 'On your marks…' : 'GO!';
 
   return (
     <main className="countdown">

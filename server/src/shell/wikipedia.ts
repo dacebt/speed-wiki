@@ -28,9 +28,9 @@ export async function pickRandomPair(): Promise<ArticlePair> {
     });
     if (!res.ok) throw new Error(`Action API returned ${res.status}`);
     const data = (await res.json()) as { query?: { random?: Array<{ title?: string }> } };
-    const titles = (data.query?.random ?? []).map((r) => r.title).filter(
-      (t): t is string => typeof t === 'string' && t.length > 0,
-    );
+    const titles = (data.query?.random ?? [])
+      .map((r) => r.title)
+      .filter((t): t is string => typeof t === 'string' && t.length > 0);
     const [startArticle, goalArticle] = titles;
     if (!startArticle || !goalArticle || startArticle === goalArticle) {
       throw new Error('Action API returned unusable titles');

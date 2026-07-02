@@ -78,13 +78,17 @@ async function main() {
 
   // Rejection: unknown target.
   host.send({ type: 'room/kick', playerId: 'nobody' });
-  check((await host.next(isError('not-in-room'), 'unknown target')).code === 'not-in-room',
-    'unknown target rejected');
+  check(
+    (await host.next(isError('not-in-room'), 'unknown target')).code === 'not-in-room',
+    'unknown target rejected',
+  );
 
   // Rejection: host cannot kick themselves.
   host.send({ type: 'room/kick', playerId: hostId });
-  check((await host.next(isError('not-in-room'), 'self kick')).code === 'not-in-room',
-    'self kick rejected');
+  check(
+    (await host.next(isError('not-in-room'), 'self kick')).code === 'not-in-room',
+    'self kick rejected',
+  );
 
   // Happy path: host kicks the guest.
   host.send({ type: 'room/kick', playerId: guestId });
@@ -107,8 +111,10 @@ async function main() {
   await host.next((m) => isSync(m) && m.room.phase === 'countdown', 'countdown started');
   const rejoinedGuestId = rejoined.you;
   host.send({ type: 'room/kick', playerId: rejoinedGuestId });
-  check((await host.next(isError('wrong-phase'), 'kick in countdown')).code === 'wrong-phase',
-    'kick outside lobby rejected wrong-phase');
+  check(
+    (await host.next(isError('wrong-phase'), 'kick in countdown')).code === 'wrong-phase',
+    'kick outside lobby rejected wrong-phase',
+  );
 
   host.close();
   guest.close();

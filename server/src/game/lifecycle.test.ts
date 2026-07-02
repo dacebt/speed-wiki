@@ -24,7 +24,10 @@ describe('phase guards', () => {
 
   test('rejects joining a room while a race is underway', () => {
     const room = startRacing(seedPlayers('host', 'guest'));
-    const decision = decide(room, client('late', { type: 'room/join', code: 'ROOM', playerName: 'Late' }));
+    const decision = decide(
+      room,
+      client('late', { type: 'room/join', code: 'ROOM', playerName: 'Late' }),
+    );
     expect(decision).toMatchObject({ ok: false, code: 'wrong-phase' });
   });
 });

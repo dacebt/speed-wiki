@@ -19,8 +19,10 @@ export function parseClientIntent(raw: unknown): ClientIntent | null {
         : null;
     case 'player/setCosmetics': {
       const c = msg.cosmetics as Record<string, unknown> | undefined;
-      return typeof c === 'object' && c !== null &&
-        typeof c.faceId === 'string' && typeof c.hatId === 'string'
+      return typeof c === 'object' &&
+        c !== null &&
+        typeof c.faceId === 'string' &&
+        typeof c.hatId === 'string'
         ? { type: 'player/setCosmetics', cosmetics: { faceId: c.faceId, hatId: c.hatId } }
         : null;
     }

@@ -25,8 +25,7 @@ export type CoreIntent =
   | { kind: 'sys/playerDisconnected'; playerId: string; at: number };
 
 export type Decision =
-  | { ok: true; events: RoomEvent[] }
-  | { ok: false; code: ErrorCode; message: string };
+  { ok: true; events: RoomEvent[] } | { ok: false; code: ErrorCode; message: string };
 
 export function decide(room: CoreRoom, intent: CoreIntent): Decision {
   switch (intent.kind) {
@@ -105,7 +104,8 @@ function decideClient(
     case 'game/start': {
       if (!player) return reject('not-in-room', 'You are not in this room.');
       if (!player.isHost) return reject('not-host', 'Only the host may start the race.');
-      if (room.phase !== 'lobby') return reject('wrong-phase', 'The race can only start from the lobby.');
+      if (room.phase !== 'lobby')
+        return reject('wrong-phase', 'The race can only start from the lobby.');
       return {
         ok: true,
         events: [
@@ -123,9 +123,7 @@ function decideClient(
 
       // Hop legality (was the article reachable from the previous page?) is a
       // deliberate no-op in v1 — see ARCHITECTURE.md standing decisions.
-      const events: RoomEvent[] = [
-        { type: 'HopMade', playerId, article: intent.article, at },
-      ];
+      const events: RoomEvent[] = [{ type: 'HopMade', playerId, article: intent.article, at }];
       if (sameArticle(intent.article, room.round.goalArticle)) {
         // Drawn from a monotonic per-round counter (not a max over currently
         // present players), so a finisher leaving the room cannot cause a
