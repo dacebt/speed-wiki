@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:analyze": "ANALYZE=1 vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b"
   },
@@ -21,6 +22,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "rollup-plugin-visualizer": "^7.0.1",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"
   }
