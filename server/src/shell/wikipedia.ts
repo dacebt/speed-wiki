@@ -11,7 +11,7 @@ export interface ArticlePair {
   goalArticle: string;
 }
 
-export function pickCuratedPair(): ArticlePair {
+function pickCuratedPair(): ArticlePair {
   const start = Math.floor(Math.random() * ARTICLE_POOL.length);
   let goal = Math.floor(Math.random() * (ARTICLE_POOL.length - 1));
   if (goal >= start) goal += 1;
@@ -19,7 +19,7 @@ export function pickCuratedPair(): ArticlePair {
 }
 
 /** Hard mode: two true-random articles. Falls back to the curated pool if the API fails. */
-export async function pickRandomPair(): Promise<ArticlePair> {
+async function pickRandomPair(): Promise<ArticlePair> {
   try {
     const url = `${ACTION_API}?action=query&list=random&rnnamespace=0&rnlimit=2&format=json`;
     const res = await fetch(url, {

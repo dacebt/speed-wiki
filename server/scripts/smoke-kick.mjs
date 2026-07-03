@@ -3,7 +3,7 @@
 // non-zero on the first failed expectation.
 //
 //   pnpm --filter server dev        # in one terminal
-//   node server/smoke-kick.mjs      # in another
+//   pnpm --filter server smoke      # in another
 
 import { io } from 'socket.io-client';
 

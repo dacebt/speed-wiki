@@ -37,7 +37,7 @@ const initialState: AppState = {
   notice: null,
 };
 
-export function reduce(state: AppState, event: AppEvent): AppState {
+function reduce(state: AppState, event: AppEvent): AppState {
   switch (event.type) {
     case 'socket/connected':
       return { ...state, connected: true };

@@ -41,7 +41,7 @@ export function initialRoom(code: string): CoreRoom {
 }
 
 /** Wikipedia titles: underscores and spaces are the same; first char is case-insensitive. */
-export function normalizeTitle(title: string): string {
+function normalizeTitle(title: string): string {
   const t = title.replaceAll('_', ' ').trim();
   return t.length === 0 ? t : t[0]!.toUpperCase() + t.slice(1);
 }

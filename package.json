@@ -10,10 +10,12 @@
     "lint": "oxlint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
+    "knip": "knip",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm knip"
   },
   "devDependencies": {
     "concurrently": "^10.0.3",
+    "knip": "^6.24.0",
     "oxlint": "^1.72.0",
     "prettier": "^3.9.4",
     "typescript": "~6.0.3",

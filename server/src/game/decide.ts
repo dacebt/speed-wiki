@@ -12,7 +12,7 @@ import { sameArticle, type CoreRoom } from './state.js';
 // rejection — nothing else. Time and randomness arrive as data on the intent.
 
 export const COUNTDOWN_MS = 10_000;
-export const ROUND_DURATION_MS = 10 * 60_000;
+const ROUND_DURATION_MS = 10 * 60_000;
 
 /** Points by finish rank (1-based); finishers past the table get the floor. */
 const POINTS_BY_RANK = [5, 4, 3, 2, 1] as const;
