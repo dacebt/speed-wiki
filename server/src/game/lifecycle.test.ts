@@ -137,6 +137,7 @@ describe('room settings', () => {
       roundDurationMs: 5 * 60_000,
       countdownMs: 5_000,
       difficulty: 'curated',
+      category: 'any',
     });
   });
 
@@ -169,6 +170,18 @@ describe('difficulty', () => {
     const { events } = apply(room, client('host', { type: 'game/start' }, 0));
     expect(events.find((e) => e.type === 'CountdownStarted')).toMatchObject({
       difficulty: 'random',
+    });
+  });
+
+  test('the chosen category is carried onto the countdown alongside difficulty', () => {
+    let room = seedPlayers('host');
+    room = apply(
+      room,
+      client('host', { type: 'room/setSettings', settings: { category: 'history' } }),
+    ).room;
+    const { events } = apply(room, client('host', { type: 'game/start' }, 0));
+    expect(events.find((e) => e.type === 'CountdownStarted')).toMatchObject({
+      category: 'history',
     });
   });
 

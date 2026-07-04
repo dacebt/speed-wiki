@@ -1,4 +1,4 @@
-import type { Difficulty, PlayerCosmetics, RoomSettings } from '@wikispeedrun/shared';
+import type { Category, Difficulty, PlayerCosmetics, RoomSettings } from '@wikispeedrun/shared';
 
 // Everything that can happen to a room. State is a pure fold over these.
 // Timestamps are server-assigned and arrive as data on the event.
@@ -13,7 +13,13 @@ export type RoomEvent =
   | { type: 'PlayerReconnected'; playerId: string; at: number }
   | { type: 'CosmeticsSet'; playerId: string; cosmetics: PlayerCosmetics; at: number }
   | { type: 'SettingsChanged'; settings: RoomSettings; at: number }
-  | { type: 'CountdownStarted'; endsAt: number; difficulty: Difficulty; at: number }
+  | {
+      type: 'CountdownStarted';
+      endsAt: number;
+      difficulty: Difficulty;
+      category: Category;
+      at: number;
+    }
   // The pending round could not be started (e.g. random articles unreachable);
   // the room returns to the lobby honestly rather than silently substituting.
   | { type: 'CountdownAborted'; at: number }

@@ -1,4 +1,5 @@
 import {
+  CATEGORIES,
   DIFFICULTIES,
   ERROR_CODES,
   ROOM_PHASES,
@@ -73,7 +74,8 @@ function isRoomSettings(value: unknown): value is RoomSettings {
     isRecord(value) &&
     typeof value.roundDurationMs === 'number' &&
     typeof value.countdownMs === 'number' &&
-    (DIFFICULTIES as readonly string[]).includes(value.difficulty as string)
+    (DIFFICULTIES as readonly string[]).includes(value.difficulty as string) &&
+    (CATEGORIES as readonly string[]).includes(value.category as string)
   );
 }
 

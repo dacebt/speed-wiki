@@ -1,6 +1,7 @@
 import {
   FACES,
   HATS,
+  type Category,
   type Difficulty,
   type PlayerView,
   type RoomSettings,
@@ -162,6 +163,14 @@ const DIFFICULTY_PRESETS: readonly { label: string; value: Difficulty }[] = [
   { label: 'Random', value: 'random' },
 ];
 
+const CATEGORY_PRESETS: readonly { label: string; value: Category }[] = [
+  { label: 'Any', value: 'any' },
+  { label: 'Science', value: 'science' },
+  { label: 'History', value: 'history' },
+  { label: 'Geography', value: 'geography' },
+  { label: 'Pop culture', value: 'pop-culture' },
+];
+
 // Every player sees the chosen setup; only the host can change it. The host sends
 // just the changed knob — the core merges it — so quick successive edits can't
 // clobber each other by shipping a full object built from a stale render.
@@ -170,6 +179,10 @@ function RoundSettings({ settings, isHost }: { settings: RoomSettings; isHost: b
     sendIntent({ type: 'room/setSettings', settings: patch });
   }
 
+  // Random draws from all of Wikipedia, so a category can't constrain it — the
+  // picker is disabled under random to keep the combination honest.
+  const categoryApplies = settings.difficulty !== 'random';
+
   return (
     <section className="panel lobby__settings">
       <span className="label">Round settings</span>
@@ -177,27 +190,34 @@ function RoundSettings({ settings, isHost }: { settings: RoomSettings; isHost: b
         name="Round length"
         presets={ROUND_PRESETS}
         current={settings.roundDurationMs}
-        isHost={isHost}
+        disabled={!isHost}
         onPick={(ms) => choose({ roundDurationMs: ms })}
       />
       <SettingRow
         name="Countdown"
         presets={COUNTDOWN_PRESETS}
         current={settings.countdownMs}
-        isHost={isHost}
+        disabled={!isHost}
         onPick={(ms) => choose({ countdownMs: ms })}
       />
       <SettingRow
         name="Difficulty"
         presets={DIFFICULTY_PRESETS}
         current={settings.difficulty}
-        isHost={isHost}
+        disabled={!isHost}
         onPick={(d) => choose({ difficulty: d })}
+      />
+      <SettingRow
+        name="Category"
+        presets={CATEGORY_PRESETS}
+        current={settings.category}
+        disabled={!isHost || !categoryApplies}
+        onPick={(c) => choose({ category: c })}
       />
       <span className="flavor lobby__settings-hint">
         {settings.difficulty === 'random'
-          ? 'Random draws two true-random pages — may the odds be ever grim.'
-          : 'Curated draws from a hand-picked pool of link-rich pages.'}
+          ? 'Random draws two true-random pages and ignores the category — may the odds be ever grim.'
+          : 'Curated draws a themed, winnable pair; “Any” uses the whole pool.'}
         {!isHost && ' The host sets the pace.'}
       </span>
     </section>
@@ -208,13 +228,13 @@ function SettingRow<T extends string | number>({
   name,
   presets,
   current,
-  isHost,
+  disabled,
   onPick,
 }: {
   name: string;
   presets: readonly { label: string; value: T }[];
   current: T;
-  isHost: boolean;
+  disabled: boolean;
   onPick: (value: T) => void;
 }) {
   return (
@@ -225,7 +245,7 @@ function SettingRow<T extends string | number>({
           <button
             key={p.value}
             className={`lobby__preset ${current === p.value ? 'lobby__preset--active' : ''}`}
-            disabled={!isHost}
+            disabled={disabled}
             onClick={() => onPick(p.value)}
           >
             {p.label}

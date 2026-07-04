@@ -155,6 +155,7 @@ function decideClient(
             type: 'CountdownStarted',
             endsAt: at + room.settings.countdownMs,
             difficulty: room.settings.difficulty,
+            category: room.settings.category,
             at,
           },
         ],

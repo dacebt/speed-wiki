@@ -1,5 +1,7 @@
+import type { Category } from '@wikispeedrun/shared';
+
 // Curated pool for start/goal articles: well-known, link-rich pages that make
-// good race targets. Hard mode bypasses this with true-random articles.
+// good race targets. Random difficulty bypasses this with true-random articles.
 // Titles are canonical English Wikipedia titles.
 
 export const ARTICLE_POOL: readonly string[] = [
@@ -164,3 +166,40 @@ export const ARTICLE_POOL: readonly string[] = [
   'Time',
   'Color',
 ] as const;
+
+export interface CategoryPair {
+  start: string;
+  goal: string;
+}
+
+// Themed start/goal pairs, one bucket per category (excluding 'any', which uses
+// the flat pool above). Each pair is hand-picked so the start article links
+// toward the goal within a hop or two — famous, link-rich pages that are never
+// dead-ends — so a category round is always winnable. Kept small and playful.
+export const CATEGORY_PAIRS: Record<Exclude<Category, 'any'>, readonly CategoryPair[]> = {
+  science: [
+    { start: 'Albert Einstein', goal: 'Physics' },
+    { start: 'Charles Darwin', goal: 'Evolution' },
+    { start: 'Isaac Newton', goal: 'Gravity' },
+    { start: 'DNA', goal: 'Biology' },
+    { start: 'Marie Curie', goal: 'Chemistry' },
+  ],
+  history: [
+    { start: 'Napoleon', goal: 'French Revolution' },
+    { start: 'Julius Caesar', goal: 'Roman Empire' },
+    { start: 'Cleopatra', goal: 'Ancient Egypt' },
+    { start: 'Genghis Khan', goal: 'Mongol Empire' },
+  ],
+  geography: [
+    { start: 'France', goal: 'Paris' },
+    { start: 'Japan', goal: 'Tokyo' },
+    { start: 'Egypt', goal: 'Nile' },
+    { start: 'Mount Everest', goal: 'Nepal' },
+  ],
+  'pop-culture': [
+    { start: 'The Beatles', goal: 'Rock music' },
+    { start: 'Star Wars', goal: 'Science fiction' },
+    { start: 'Harry Potter', goal: 'J. K. Rowling' },
+    { start: 'Batman', goal: 'DC Comics' },
+  ],
+};

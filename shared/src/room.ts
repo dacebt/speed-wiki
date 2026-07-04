@@ -9,6 +9,12 @@ import type { PlayerCosmetics } from './cosmetics.js';
 export const DIFFICULTIES = ['curated', 'random'] as const;
 export type Difficulty = (typeof DIFFICULTIES)[number];
 
+// Theme for the curated start/goal pair. 'any' is unconstrained (today's flat
+// pool); the rest draw from category-specific reachable pairs. Category applies
+// to the curated path only — random difficulty ignores it (see the shell).
+export const CATEGORIES = ['any', 'science', 'history', 'geography', 'pop-culture'] as const;
+export type Category = (typeof CATEGORIES)[number];
+
 // RoomSettings — the single home for every host-tunable knob. Set in the lobby
 // before Start, carried into the round, and read by the core in place of module
 // constants. Later capabilities (category) extend this same object, so it is
@@ -18,12 +24,14 @@ export interface RoomSettings {
   roundDurationMs: number;
   countdownMs: number;
   difficulty: Difficulty;
+  category: Category;
 }
 
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   roundDurationMs: 10 * 60_000,
   countdownMs: 10_000,
   difficulty: 'curated',
+  category: 'any',
 };
 
 // Accepted ranges; the core rejects out-of-range settings rather than clamping.
@@ -42,7 +50,8 @@ export function isRoomSettingsInRange(s: RoomSettings): boolean {
     s.roundDurationMs <= ROUND_DURATION_MAX_MS &&
     s.countdownMs >= COUNTDOWN_MIN_MS &&
     s.countdownMs <= COUNTDOWN_MAX_MS &&
-    (DIFFICULTIES as readonly string[]).includes(s.difficulty)
+    (DIFFICULTIES as readonly string[]).includes(s.difficulty) &&
+    (CATEGORIES as readonly string[]).includes(s.category)
   );
 }
 

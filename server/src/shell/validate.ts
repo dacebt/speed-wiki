@@ -1,5 +1,7 @@
 import {
+  CATEGORIES,
   DIFFICULTIES,
+  type Category,
   type ClientIntent,
   type Difficulty,
   type RoomSettings,
@@ -52,6 +54,11 @@ export function parseClientIntent(raw: unknown): ClientIntent | null {
         if (typeof s.difficulty !== 'string') return null;
         if (!(DIFFICULTIES as readonly string[]).includes(s.difficulty)) return null;
         settings.difficulty = s.difficulty as Difficulty;
+      }
+      if ('category' in s) {
+        if (typeof s.category !== 'string') return null;
+        if (!(CATEGORIES as readonly string[]).includes(s.category)) return null;
+        settings.category = s.category as Category;
       }
       return { type: 'room/setSettings', settings };
     }

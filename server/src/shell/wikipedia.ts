@@ -1,5 +1,5 @@
-import type { Difficulty } from '@wikispeedrun/shared';
-import { ARTICLE_POOL } from '../game/articles.js';
+import type { Category, Difficulty } from '@wikispeedrun/shared';
+import { ARTICLE_POOL, CATEGORY_PAIRS } from '../game/articles.js';
 
 // Article selection is shell territory: it involves randomness and (for random
 // difficulty) network I/O. The chosen pair enters the core as data on an intent.
@@ -13,7 +13,14 @@ export interface ArticlePair {
   goalArticle: string;
 }
 
-function pickCuratedPair(): ArticlePair {
+// 'any' keeps the original behavior: two distinct articles from the flat pool.
+// A specific category draws one of its hand-picked, reachable start/goal pairs.
+function pickCuratedPair(category: Category): ArticlePair {
+  if (category !== 'any') {
+    const pairs = CATEGORY_PAIRS[category];
+    const pair = pairs[Math.floor(Math.random() * pairs.length)]!;
+    return { startArticle: pair.start, goalArticle: pair.goal };
+  }
   const start = Math.floor(Math.random() * ARTICLE_POOL.length);
   let goal = Math.floor(Math.random() * (ARTICLE_POOL.length - 1));
   if (goal >= start) goal += 1;
@@ -56,6 +63,9 @@ async function pickRandomPair(): Promise<ArticlePair> {
   );
 }
 
-export function pickPair(difficulty: Difficulty): Promise<ArticlePair> {
-  return difficulty === 'random' ? pickRandomPair() : Promise.resolve(pickCuratedPair());
+// Category × difficulty: category constrains the curated path only. Random draws
+// from all of Wikipedia and ignores the category — the one non-contradictory
+// combination (the lobby disables the category picker under random to match).
+export function pickPair(difficulty: Difficulty, category: Category): Promise<ArticlePair> {
+  return difficulty === 'random' ? pickRandomPair() : Promise.resolve(pickCuratedPair(category));
 }

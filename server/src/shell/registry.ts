@@ -160,7 +160,7 @@ function react(runtime: RoomRuntime, event: RoomEvent): void {
       // the timer and the pick have completed. Settle the selection to a plain
       // value with its handler attached NOW — a random-fetch rejection can land
       // mid-countdown, and an unhandled rejection would crash the process.
-      const selection = pickPair(event.difficulty).then(
+      const selection = pickPair(event.difficulty, event.category).then(
         (pair) => ({ ok: true as const, pair }),
         (err: unknown) => ({ ok: false as const, err }),
       );
