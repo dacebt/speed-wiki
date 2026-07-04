@@ -78,9 +78,18 @@
   padding: 10px 12px;
 }
 
+.lobby__player--away {
+  opacity: 0.55;
+}
+
 .lobby__player-info {
   display: flex;
   flex-direction: column;
+}
+
+.lobby__away {
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .lobby__player-name {

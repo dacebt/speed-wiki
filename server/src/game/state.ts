@@ -14,6 +14,8 @@ export interface CorePlayer {
   finishedRank: number | null;
   finishedAfterMs: number | null;
   gaveUp: boolean;
+  /** Socket dropped, slot held pending a rejoin. Not removed until the grace window lapses. */
+  away: boolean;
 }
 
 export interface CoreRoom {

@@ -192,6 +192,22 @@ body {
   z-index: 100;
 }
 
+.reconnecting {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-raised);
+  border: 1px solid var(--gold-dim);
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-family: var(--font-flavor);
+  font-style: italic;
+  color: var(--gold-bright);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+}
+
 .screen-title {
   font-family: var(--font-display);
   font-weight: 900;

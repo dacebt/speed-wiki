@@ -128,7 +128,7 @@ function PlayerCard({
   canKick: boolean;
 }) {
   return (
-    <li className="lobby__player">
+    <li className={`lobby__player ${player.away ? 'lobby__player--away' : ''}`}>
       <Avatar cosmetics={player.cosmetics} />
       <div className="lobby__player-info">
         <span className="lobby__player-name">
@@ -136,6 +136,7 @@ function PlayerCard({
           {isYou && <span className="flavor"> (you)</span>}
         </span>
         {player.isHost && <span className="label lobby__host">Host</span>}
+        {player.away && <span className="flavor lobby__away">reconnecting…</span>}
         {showScore && <span className="lobby__score">{player.score} points</span>}
       </div>
       {canKick && (

@@ -44,8 +44,8 @@ io.on('connection', (socket: Socket) => {
     if (intent.type === 'room/create') {
       if (socket.data.roomCode) return;
       const runtime = createRoom();
-      joinSocket(runtime, socket);
-      if (!dispatch(runtime, { kind: 'client', playerId: socket.id, at, intent }, socket)) {
+      joinSocket(runtime, socket, intent.playerId);
+      if (!dispatch(runtime, { kind: 'client', playerId: intent.playerId, at, intent }, socket)) {
         leaveSocket(runtime, socket);
       }
       return;
@@ -62,16 +62,17 @@ io.on('connection', (socket: Socket) => {
         });
         return;
       }
-      joinSocket(runtime, socket);
-      if (!dispatch(runtime, { kind: 'client', playerId: socket.id, at, intent }, socket)) {
+      joinSocket(runtime, socket, intent.playerId);
+      if (!dispatch(runtime, { kind: 'client', playerId: intent.playerId, at, intent }, socket)) {
         leaveSocket(runtime, socket);
       }
       return;
     }
 
     const code = socket.data.roomCode as string | undefined;
+    const playerId = socket.data.playerId as string | undefined;
     const runtime = code ? getRoom(code) : undefined;
-    if (!runtime) {
+    if (!runtime || !playerId) {
       socket.emit(MESSAGE_EVENT, {
         type: 'room/error',
         code: 'not-in-room',
@@ -79,7 +80,7 @@ io.on('connection', (socket: Socket) => {
       });
       return;
     }
-    dispatch(runtime, { kind: 'client', playerId: socket.id, at, intent }, socket);
+    dispatch(runtime, { kind: 'client', playerId, at, intent }, socket);
   });
 
   socket.on('disconnect', () => handleDisconnect(socket));

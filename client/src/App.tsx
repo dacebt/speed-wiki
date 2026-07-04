@@ -7,7 +7,7 @@ import { RaceScreen } from './features/race/RaceScreen';
 import { ResultsScreen } from './features/results/ResultsScreen';
 
 export default function App() {
-  const { room, notice } = useAppState();
+  const { room, notice, reconnecting } = useAppState();
   const dispatch = useAppDispatch();
 
   useEffect(() => {
@@ -19,6 +19,11 @@ export default function App() {
   return (
     <>
       {renderScreen()}
+      {reconnecting && (
+        <div className="reconnecting" role="status">
+          Reconnecting…
+        </div>
+      )}
       {notice && <div className="toast">{notice.message}</div>}
     </>
   );

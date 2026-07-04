@@ -10,12 +10,14 @@ export function parseClientIntent(raw: unknown): ClientIntent | null {
 
   switch (msg.type) {
     case 'room/create':
-      return typeof msg.playerName === 'string'
-        ? { type: 'room/create', playerName: msg.playerName }
+      return typeof msg.playerName === 'string' && typeof msg.playerId === 'string'
+        ? { type: 'room/create', playerName: msg.playerName, playerId: msg.playerId }
         : null;
     case 'room/join':
-      return typeof msg.code === 'string' && typeof msg.playerName === 'string'
-        ? { type: 'room/join', code: msg.code, playerName: msg.playerName }
+      return typeof msg.code === 'string' &&
+        typeof msg.playerName === 'string' &&
+        typeof msg.playerId === 'string'
+        ? { type: 'room/join', code: msg.code, playerName: msg.playerName, playerId: msg.playerId }
         : null;
     case 'player/setCosmetics': {
       const c = msg.cosmetics as Record<string, unknown> | undefined;

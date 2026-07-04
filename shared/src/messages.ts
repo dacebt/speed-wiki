@@ -5,8 +5,11 @@ import type { RoomSync } from './room.js';
 // Clients send intents; the server decides; clients render what they're told.
 
 export type ClientIntent =
-  | { type: 'room/create'; playerName: string }
-  | { type: 'room/join'; code: string; playerName: string }
+  // playerId is the client-generated, localStorage-persisted identity (see
+  // client/src/lib/identity.ts). The server keys players by it, so a create or
+  // join carrying a playerId already in the room is a rejoin, not a new player.
+  | { type: 'room/create'; playerName: string; playerId: string }
+  | { type: 'room/join'; code: string; playerName: string; playerId: string }
   | { type: 'player/setCosmetics'; cosmetics: PlayerCosmetics }
   | { type: 'game/start'; hardMode: boolean }
   | { type: 'race/hop'; article: string }

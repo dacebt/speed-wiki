@@ -13,10 +13,18 @@ import { pickPair } from './wikipedia.js';
 
 const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
+// How long a dropped player's slot is held before the grace window lapses and
+// they are removed for real. A refresh or wifi blip reconnects in seconds; this
+// window covers that without stranding a room on a player who closed the tab.
+const REJOIN_GRACE_MS = 45_000;
+
 interface RoomRuntime {
   state: CoreRoom;
   log: RoomEvent[];
+  /** playerId → the live socket currently attached to that player. */
   members: Map<string, Socket>;
+  /** playerId → pending grace-window removal for a dropped player. */
+  graceTimers: Map<string, NodeJS.Timeout>;
   countdownTimer: NodeJS.Timeout | null;
   roundTimer: NodeJS.Timeout | null;
 }
@@ -35,6 +43,7 @@ export function createRoom(): RoomRuntime {
     state: initialRoom(code),
     log: [],
     members: new Map(),
+    graceTimers: new Map(),
     countdownTimer: null,
     roundTimer: null,
   };
@@ -69,26 +78,63 @@ export function dispatch(runtime: RoomRuntime, intent: CoreIntent, origin?: Sock
   return true;
 }
 
-export function joinSocket(runtime: RoomRuntime, socket: Socket): void {
-  runtime.members.set(socket.id, socket);
+/** Attach a socket to a player. A reconnecting player arrives on a fresh socket,
+    so this rebinds the transport handle and cancels any pending grace removal. */
+export function joinSocket(runtime: RoomRuntime, socket: Socket, playerId: string): void {
+  runtime.members.set(playerId, socket);
   socket.data.roomCode = runtime.state.code;
+  socket.data.playerId = playerId;
+  cancelGrace(runtime, playerId);
 }
 
 /** Undo a socket's membership (e.g. after a rejected join). */
 export function leaveSocket(runtime: RoomRuntime, socket: Socket): void {
-  runtime.members.delete(socket.id);
+  const playerId = socket.data.playerId as string | undefined;
+  if (playerId) runtime.members.delete(playerId);
   delete socket.data.roomCode;
+  delete socket.data.playerId;
   if (runtime.state.players.length === 0 && runtime.members.size === 0) destroyRoom(runtime);
 }
 
 export function handleDisconnect(socket: Socket): void {
   const code = socket.data.roomCode as string | undefined;
-  if (!code) return;
+  const playerId = socket.data.playerId as string | undefined;
+  if (!code || !playerId) return;
   const runtime = rooms.get(code);
   if (!runtime) return;
-  runtime.members.delete(socket.id);
-  dispatch(runtime, { kind: 'sys/playerDisconnected', playerId: socket.id, at: Date.now() });
-  if (runtime.state.players.length === 0) destroyRoom(runtime);
+  // A fast reconnect can rebind the player to a newer socket before this old
+  // socket's disconnect arrives. If so, this is a stale disconnect for a player
+  // who is once again live — ignore it entirely, or we would mark an active
+  // player away and never clear it.
+  if (runtime.members.get(playerId) !== socket) return;
+  runtime.members.delete(playerId);
+  // Hold the slot: mark away now, and schedule the real removal for when the
+  // grace window lapses without a rejoin.
+  dispatch(runtime, { kind: 'sys/playerAway', playerId, at: Date.now() });
+  scheduleGrace(runtime, playerId);
+}
+
+/** After the grace window, a still-absent player leaves for real (host transfer,
+    round-end recheck). A rejoin in the meantime cancels this. */
+function scheduleGrace(runtime: RoomRuntime, playerId: string): void {
+  cancelGrace(runtime, playerId);
+  const code = runtime.state.code;
+  const timer = setTimeout(() => {
+    runtime.graceTimers.delete(playerId);
+    if (!rooms.has(code)) return;
+    if (runtime.members.has(playerId)) return;
+    dispatch(runtime, { kind: 'sys/playerLeft', playerId, at: Date.now() });
+    if (runtime.state.players.length === 0) destroyRoom(runtime);
+  }, REJOIN_GRACE_MS);
+  runtime.graceTimers.set(playerId, timer);
+}
+
+function cancelGrace(runtime: RoomRuntime, playerId: string): void {
+  const timer = runtime.graceTimers.get(playerId);
+  if (timer) {
+    clearTimeout(timer);
+    runtime.graceTimers.delete(playerId);
+  }
 }
 
 function destroyRoom(runtime: RoomRuntime): void {
@@ -101,6 +147,8 @@ function clearTimers(runtime: RoomRuntime): void {
   if (runtime.roundTimer) clearTimeout(runtime.roundTimer);
   runtime.countdownTimer = null;
   runtime.roundTimer = null;
+  for (const timer of runtime.graceTimers.values()) clearTimeout(timer);
+  runtime.graceTimers.clear();
 }
 
 /** Effectful reactions to events: timer scheduling, article selection, and
@@ -142,6 +190,7 @@ function react(runtime: RoomRuntime, event: RoomEvent): void {
       // Kick is not disconnect: the socket stays connected but leaves the room.
       // Tell it it was removed and drop it from members before the broadcast so
       // the room's syncs no longer reach it.
+      cancelGrace(runtime, event.playerId);
       const socket = runtime.members.get(event.playerId);
       if (socket) {
         send(socket, {
@@ -151,6 +200,7 @@ function react(runtime: RoomRuntime, event: RoomEvent): void {
         });
         runtime.members.delete(event.playerId);
         delete socket.data.roomCode;
+        delete socket.data.playerId;
       }
       break;
     }

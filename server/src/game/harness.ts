@@ -30,7 +30,7 @@ export function client(playerId: string, intent: ClientIntent, at = 0): CoreInte
 export function seedPlayers(...ids: string[]): CoreRoom {
   let room = initialRoom('ROOM');
   for (const id of ids) {
-    room = apply(room, client(id, { type: 'room/create', playerName: id })).room;
+    room = apply(room, client(id, { type: 'room/create', playerName: id, playerId: id })).room;
   }
   return room;
 }

@@ -1,9 +1,8 @@
 import { MAX_NAME_LENGTH, ROOM_CODE_LENGTH } from '@wikispeedrun/shared';
 import { useEffect, useState, type FormEvent } from 'react';
+import { getPlayerId, getPlayerName, setPlayerName } from '../../lib/identity';
 import { sendIntent } from '../../lib/socket';
 import './home.css';
-
-const NAME_STORAGE_KEY = 'wikispeedrun.playerName';
 
 /** Read a `?code=` invite param, normalized to the room-code shape. */
 function readCodeParam(): string {
@@ -12,7 +11,7 @@ function readCodeParam(): string {
 }
 
 export function HomeScreen() {
-  const [name, setName] = useState(() => localStorage.getItem(NAME_STORAGE_KEY) ?? '');
+  const [name, setName] = useState(getPlayerName);
   const [code, setCode] = useState(readCodeParam);
 
   // Consume the invite param once: strip it so a refresh doesn't re-join, and
@@ -26,31 +25,37 @@ export function HomeScreen() {
     const qs = params.toString();
     window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
 
-    const remembered = (localStorage.getItem(NAME_STORAGE_KEY) ?? '').trim();
+    const remembered = getPlayerName().trim();
     const nameValid = remembered.length > 0 && remembered.length <= MAX_NAME_LENGTH;
     if (nameValid && invited.length === ROOM_CODE_LENGTH) {
-      sendIntent({ type: 'room/join', code: invited, playerName: remembered });
+      sendIntent({
+        type: 'room/join',
+        code: invited,
+        playerName: remembered,
+        playerId: getPlayerId(),
+      });
     }
   }, []);
 
   const trimmedName = name.trim();
   const nameOk = trimmedName.length > 0 && trimmedName.length <= MAX_NAME_LENGTH;
 
-  function rememberName() {
-    localStorage.setItem(NAME_STORAGE_KEY, trimmedName);
-  }
-
   function createRoom() {
     if (!nameOk) return;
-    rememberName();
-    sendIntent({ type: 'room/create', playerName: trimmedName });
+    setPlayerName(trimmedName);
+    sendIntent({ type: 'room/create', playerName: trimmedName, playerId: getPlayerId() });
   }
 
   function joinRoom(e: FormEvent) {
     e.preventDefault();
     if (!nameOk || code.trim().length !== ROOM_CODE_LENGTH) return;
-    rememberName();
-    sendIntent({ type: 'room/join', code: code.trim().toUpperCase(), playerName: trimmedName });
+    setPlayerName(trimmedName);
+    sendIntent({
+      type: 'room/join',
+      code: code.trim().toUpperCase(),
+      playerName: trimmedName,
+      playerId: getPlayerId(),
+    });
   }
 
   return (

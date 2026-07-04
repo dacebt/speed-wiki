@@ -14,7 +14,7 @@ describe('rank assignment', () => {
     expect(finishRank(afterA.events)).toBe(1);
 
     const withoutA = apply(afterA.room, {
-      kind: 'sys/playerDisconnected',
+      kind: 'sys/playerLeft',
       playerId: 'a',
       at: 1500,
     }).room;

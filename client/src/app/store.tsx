@@ -7,6 +7,7 @@ import {
   type Dispatch,
   type ReactNode,
 } from 'react';
+import { clearLastRoom, setLastRoom } from '../lib/identity';
 import { subscribe } from '../lib/socket';
 
 // MVU: client state is a reducer over server messages and local UI events.
@@ -19,6 +20,8 @@ export interface AppState {
   room: RoomSync | null;
   /** serverClock − clientClock at last sync; add to Date.now() to compare with server timestamps. */
   clockOffset: number;
+  /** Socket dropped while in a room; the room is held and a rejoin is in flight. */
+  reconnecting: boolean;
   notice: { code: ErrorCode | 'disconnected'; message: string } | null;
 }
 
@@ -34,6 +37,7 @@ const initialState: AppState = {
   you: null,
   room: null,
   clockOffset: 0,
+  reconnecting: false,
   notice: null,
 };
 
@@ -42,14 +46,16 @@ function reduce(state: AppState, event: AppEvent): AppState {
     case 'socket/connected':
       return { ...state, connected: true };
     case 'socket/disconnected':
-      // The server keeps no session for us; a drop means starting over.
-      return {
-        connected: false,
-        you: null,
-        room: null,
-        clockOffset: 0,
-        notice: { code: 'disconnected', message: 'Connection to the server was lost.' },
-      };
+      // In a room, the server holds our slot through a grace window and the
+      // socket layer auto-rejoins on reconnect — so keep the room on screen and
+      // show a reconnecting state instead of bouncing to Home. With no room, a
+      // drop just means the server is unreachable; reset.
+      return state.room === null
+        ? {
+            ...initialState,
+            notice: { code: 'disconnected', message: 'Connection to the server was lost.' },
+          }
+        : { ...state, connected: false, reconnecting: true };
     case 'server/message': {
       const { message } = event;
       if (message.type === 'room/sync') {
@@ -58,6 +64,7 @@ function reduce(state: AppState, event: AppEvent): AppState {
           room: message.room,
           you: message.you,
           clockOffset: message.at - event.receivedAt,
+          reconnecting: false,
           // Entering a room from Home supersedes any lingering transient toast
           // (e.g. the removal notice when a kicked player rejoins). Notices
           // raised while already in a room — like the out-of-bounds warning —
@@ -68,6 +75,15 @@ function reduce(state: AppState, event: AppEvent): AppState {
       // Being kicked ends our membership: clear room state and land on Home,
       // the same reset a disconnect performs, with the removal notice.
       if (message.code === 'kicked') {
+        return {
+          ...initialState,
+          connected: state.connected,
+          notice: { code: message.code, message: message.message },
+        };
+      }
+      // A rejoin (or manual join) to a room the server no longer has: our held
+      // slot is gone, so drop back to Home rather than dangling in a dead room.
+      if (message.code === 'room-not-found' && state.room !== null) {
         return {
           ...initialState,
           connected: state.connected,
@@ -99,6 +115,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }),
     [],
   );
+
+  // Mirror room membership into localStorage so the socket layer can auto-rejoin
+  // after a refresh or reconnect. Only *set* here — clearing on an empty room at
+  // mount would wipe a persisted code before auto-rejoin could read it.
+  const roomCode = state.room?.code ?? null;
+  useEffect(() => {
+    if (roomCode) setLastRoom(roomCode);
+  }, [roomCode]);
+
+  // Any server error shown while we're on Home means an auto-rejoin (or manual
+  // join) was rejected — dead room, race underway, bad name, or a kick. Forget
+  // the stored code uniformly so a reload doesn't keep re-attempting a room we
+  // can't get into. ('disconnected' is a local notice, not a join rejection.)
+  const rejectedOnHome =
+    state.room === null && state.notice !== null && state.notice.code !== 'disconnected';
+  useEffect(() => {
+    if (rejectedOnHome) clearLastRoom();
+  }, [rejectedOnHome]);
 
   return (
     <StateContext.Provider value={state}>

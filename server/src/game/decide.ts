@@ -22,7 +22,10 @@ export type CoreIntent =
   | { kind: 'client'; playerId: string; at: number; intent: ClientIntent }
   | { kind: 'sys/countdownFinished'; startArticle: string; goalArticle: string; at: number }
   | { kind: 'sys/roundTimedOut'; at: number }
-  | { kind: 'sys/playerDisconnected'; playerId: string; at: number };
+  // A dropped socket marks the player away (slot held); a lapsed grace window
+  // finally removes them. The shell owns the grace timer — see registry.ts.
+  | { kind: 'sys/playerAway'; playerId: string; at: number }
+  | { kind: 'sys/playerLeft'; playerId: string; at: number };
 
 export type Decision =
   { ok: true; events: RoomEvent[] } | { ok: false; code: ErrorCode; message: string };
@@ -53,7 +56,19 @@ export function decide(room: CoreRoom, intent: CoreIntent): Decision {
       if (room.phase !== 'racing') return { ok: true, events: [] };
       return { ok: true, events: [endRound(room, intent.at)] };
     }
-    case 'sys/playerDisconnected': {
+    case 'sys/playerAway': {
+      // Hold the slot: mark away rather than removing, so a rejoin reattaches.
+      // Benign in lobby/countdown/results; an away racer is handled by the
+      // grace window (shell) and the mid-race rejoin capability.
+      const player = room.players.find((p) => p.id === intent.playerId);
+      if (!player || player.away) return { ok: true, events: [] };
+      return {
+        ok: true,
+        events: [{ type: 'PlayerAway', playerId: intent.playerId, at: intent.at }],
+      };
+    }
+    case 'sys/playerLeft': {
+      // The grace window lapsed without a rejoin: a real departure.
       if (!room.players.some((p) => p.id === intent.playerId)) return { ok: true, events: [] };
       const events: RoomEvent[] = [
         { type: 'PlayerLeft', playerId: intent.playerId, at: intent.at },
@@ -80,6 +95,12 @@ function decideClient(
     // this room. The shell resolves the code and creates the room object.
     case 'room/create':
     case 'room/join': {
+      // A create/join whose playerId is already in the room is a rejoin: the
+      // slot is reattached in any phase (that is the whole point of a stable
+      // id), never appended as a duplicate. A brand-new player stays phase-gated.
+      if (player) {
+        return { ok: true, events: [{ type: 'PlayerReconnected', playerId, at }] };
+      }
       if (room.phase !== 'lobby' && room.phase !== 'results') {
         return reject('wrong-phase', 'A race is underway — try again between rounds.');
       }

@@ -28,6 +28,8 @@ export interface PlayerView {
   finishedAfterMs: number | null;
   /** True if the player conceded this round. */
   gaveUp: boolean;
+  /** True while the player's socket is dropped but their slot is held for a rejoin. */
+  away: boolean;
 }
 
 export interface RoundView {

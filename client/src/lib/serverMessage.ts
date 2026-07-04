@@ -50,7 +50,8 @@ function isPlayerView(value: unknown): value is PlayerView {
     typeof value.clicks === 'number' &&
     isNumberOrNull(value.finishedRank) &&
     isNumberOrNull(value.finishedAfterMs) &&
-    typeof value.gaveUp === 'boolean'
+    typeof value.gaveUp === 'boolean' &&
+    typeof value.away === 'boolean'
   );
 }
 

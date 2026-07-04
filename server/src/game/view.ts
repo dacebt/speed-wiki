@@ -20,6 +20,7 @@ export function toRoomSync(room: CoreRoom): RoomSync {
       finishedRank: p.finishedRank,
       finishedAfterMs: p.finishedAfterMs,
       gaveUp: p.gaveUp,
+      away: p.away,
     })),
   };
 }

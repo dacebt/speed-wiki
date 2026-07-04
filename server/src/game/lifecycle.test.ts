@@ -26,7 +26,7 @@ describe('phase guards', () => {
     const room = startRacing(seedPlayers('host', 'guest'));
     const decision = decide(
       room,
-      client('late', { type: 'room/join', code: 'ROOM', playerName: 'Late' }),
+      client('late', { type: 'room/join', code: 'ROOM', playerName: 'Late', playerId: 'late' }),
     );
     expect(decision).toMatchObject({ ok: false, code: 'wrong-phase' });
   });
