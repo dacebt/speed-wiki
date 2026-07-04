@@ -110,3 +110,31 @@ describe('host transfer on a player leaving', () => {
     ]);
   });
 });
+
+describe('away racer round end', () => {
+  test('holds the round while a racer is away, then ends it when the grace window removes them', () => {
+    const room = startRacing(seedPlayers('a', 'b'), { goal: 'Goal', at: 0 });
+    const aWon = apply(room, client('a', { type: 'race/hop', article: 'Goal' }, 1000)).room;
+    // b drops mid-race: marked away, slot held — the round must not end early.
+    const bAway = apply(aWon, { kind: 'sys/playerAway', playerId: 'b', at: 1500 }).room;
+    expect(bAway.phase).toBe('racing');
+    expect(bAway.players.find((p) => p.id === 'b')?.away).toBe(true);
+    // b never rejoins; the grace window lapses and removes them, ending the round.
+    const ended = apply(bAway, { kind: 'sys/playerLeft', playerId: 'b', at: 47_000 }).room;
+    expect(ended.phase).toBe('results');
+  });
+
+  test('a rejoining away racer is no longer away and keeps their in-progress path', () => {
+    const room = startRacing(seedPlayers('a', 'b'), { start: 'Start', goal: 'Goal', at: 0 });
+    const moved = apply(room, client('a', { type: 'race/hop', article: 'Mid' }, 500)).room;
+    const away = apply(moved, { kind: 'sys/playerAway', playerId: 'a', at: 800 }).room;
+    const back = apply(
+      away,
+      client('a', { type: 'room/join', code: 'ROOM', playerName: 'a', playerId: 'a' }, 1000),
+    ).room;
+    const a = back.players.find((p) => p.id === 'a')!;
+    expect(a.away).toBe(false);
+    expect(a.path).toEqual(['Start', 'Mid']);
+    expect(back.phase).toBe('racing');
+  });
+});

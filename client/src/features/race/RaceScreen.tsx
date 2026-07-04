@@ -9,13 +9,19 @@ import './race.css';
 export function RaceScreen() {
   const { room, you, clockOffset } = useAppState();
   const dispatch = useAppDispatch();
+  const me = room?.players.find((p) => p.id === you);
+  // Rejoin lands you back on your current article — the last confirmed hop in
+  // the synced path (the server never lost it), or the start if you hadn't moved
+  // yet. A hop that was mid-fetch when the socket dropped was never confirmed,
+  // so it isn't in the path and we correctly resume from the last real page.
+  const myPath = me?.path ?? [];
+  const resumeArticle = myPath[myPath.length - 1] ?? room?.round?.startArticle ?? '';
   // seq bumps on every navigate so re-clicking the same link after a failed
   // fetch still changes ArticlePane's effect deps and retries the load.
-  const [nav, setNav] = useState(() => ({ title: room?.round?.startArticle ?? '', seq: 0 }));
-  // Whether the next arrival is a hop to report (initial round load is not).
+  const [nav, setNav] = useState(() => ({ title: resumeArticle, seq: 0 }));
+  // Whether the next arrival is a hop to report (initial/rejoin load is not).
   const hopPendingRef = useRef(false);
 
-  const me = room?.players.find((p) => p.id === you);
   const frozen = (me?.finishedRank ?? null) !== null || (me?.gaveUp ?? false);
 
   if (!room?.round || !me) return null;
@@ -167,6 +173,7 @@ function compareProgress(a: PlayerView, b: PlayerView): number {
 function playerStatus(p: PlayerView): string {
   if (p.finishedRank !== null) return `arrived in ${p.clicks} clicks`;
   if (p.gaveUp) return 'gave up';
+  if (p.away) return 'reconnecting…';
   const current = p.path[p.path.length - 1];
   return current ? `reading ${current}` : 'picking a starting point';
 }
