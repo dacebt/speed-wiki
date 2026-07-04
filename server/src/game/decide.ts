@@ -1,4 +1,5 @@
 import {
+  isRoomSettingsInRange,
   isValidCosmetics,
   MAX_NAME_LENGTH,
   type ClientIntent,
@@ -10,9 +11,6 @@ import { sameArticle, type CoreRoom } from './state.js';
 
 // All game rules live here. An intent either becomes a list of events or a
 // rejection — nothing else. Time and randomness arrive as data on the intent.
-
-export const COUNTDOWN_MS = 10_000;
-const ROUND_DURATION_MS = 10 * 60_000;
 
 /** Points by finish rank (1-based); finishers past the table get the floor. */
 const POINTS_BY_RANK = [5, 4, 3, 2, 1] as const;
@@ -47,7 +45,7 @@ export function decide(room: CoreRoom, intent: CoreIntent): Decision {
             goalArticle: intent.goalArticle,
             hardMode: room.pendingHardMode,
             startedAt: intent.at,
-            deadline: intent.at + ROUND_DURATION_MS,
+            deadline: intent.at + room.settings.roundDurationMs,
           },
         ],
       };
@@ -122,6 +120,23 @@ function decideClient(
       };
     }
 
+    case 'room/setSettings': {
+      if (!player) return reject('not-in-room', 'You are not in this room.');
+      if (!player.isHost) return reject('not-host', 'Only the host may change settings.');
+      if (room.phase !== 'lobby') {
+        return reject('wrong-phase', 'Settings can only be changed in the lobby.');
+      }
+      // Merge the patch onto the current settings, then range-check the result.
+      // Rejecting out-of-range rather than clamping keeps a silent coercion from
+      // hiding the boundary failure (standards §7). The event carries the full
+      // merged object — the room always holds one complete RoomSettings.
+      const merged = { ...room.settings, ...intent.settings };
+      if (!isRoomSettingsInRange(merged)) {
+        return reject('invalid-settings', 'Those settings are outside the allowed range.');
+      }
+      return { ok: true, events: [{ type: 'SettingsChanged', settings: merged, at }] };
+    }
+
     case 'game/start': {
       if (!player) return reject('not-in-room', 'You are not in this room.');
       if (!player.isHost) return reject('not-host', 'Only the host may start the race.');
@@ -130,7 +145,12 @@ function decideClient(
       return {
         ok: true,
         events: [
-          { type: 'CountdownStarted', endsAt: at + COUNTDOWN_MS, hardMode: intent.hardMode, at },
+          {
+            type: 'CountdownStarted',
+            endsAt: at + room.settings.countdownMs,
+            hardMode: intent.hardMode,
+            at,
+          },
         ],
       };
     }

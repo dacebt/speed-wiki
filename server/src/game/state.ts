@@ -1,4 +1,10 @@
-import type { PlayerCosmetics, RoomPhase, RoundView } from '@wikispeedrun/shared';
+import {
+  DEFAULT_ROOM_SETTINGS,
+  type PlayerCosmetics,
+  type RoomPhase,
+  type RoomSettings,
+  type RoundView,
+} from '@wikispeedrun/shared';
 
 // Internal room state, produced only by reducing events. The sync view sent
 // to clients is derived from it in view.ts.
@@ -24,6 +30,7 @@ export interface CoreRoom {
   players: CorePlayer[];
   round: RoundView | null;
   countdownEndsAt: number | null;
+  settings: RoomSettings;
   pendingHardMode: boolean;
   roundsPlayed: number;
   ranksAssigned: number;
@@ -36,6 +43,7 @@ export function initialRoom(code: string): CoreRoom {
     players: [],
     round: null,
     countdownEndsAt: null,
+    settings: DEFAULT_ROOM_SETTINGS,
     pendingHardMode: false,
     roundsPlayed: 0,
     ranksAssigned: 0,

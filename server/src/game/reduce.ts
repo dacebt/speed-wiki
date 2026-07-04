@@ -47,6 +47,9 @@ export function reduce(room: CoreRoom, event: RoomEvent): CoreRoom {
     case 'CosmeticsSet':
       return updatePlayer(room, event.playerId, (p) => ({ ...p, cosmetics: event.cosmetics }));
 
+    case 'SettingsChanged':
+      return { ...room, settings: event.settings };
+
     case 'CountdownStarted':
       return {
         ...room,

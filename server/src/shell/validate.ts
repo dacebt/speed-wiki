@@ -1,4 +1,4 @@
-import type { ClientIntent } from '@wikispeedrun/shared';
+import type { ClientIntent, RoomSettings } from '@wikispeedrun/shared';
 
 // Boundary validation: anything arriving over the wire is untrusted until it
 // structurally matches a known intent. The core assumes shapes are valid;
@@ -27,6 +27,23 @@ export function parseClientIntent(raw: unknown): ClientIntent | null {
         typeof c.hatId === 'string'
         ? { type: 'player/setCosmetics', cosmetics: { faceId: c.faceId, hatId: c.hatId } }
         : null;
+    }
+    case 'room/setSettings': {
+      // Structural only — the core merges and range-checks (domain validity). A
+      // partial patch: pass through whichever known knobs are present and typed;
+      // a present-but-wrong-typed field rejects the whole intent.
+      if (typeof msg.settings !== 'object' || msg.settings === null) return null;
+      const s = msg.settings as Record<string, unknown>;
+      const settings: Partial<RoomSettings> = {};
+      if ('roundDurationMs' in s) {
+        if (typeof s.roundDurationMs !== 'number') return null;
+        settings.roundDurationMs = s.roundDurationMs;
+      }
+      if ('countdownMs' in s) {
+        if (typeof s.countdownMs !== 'number') return null;
+        settings.countdownMs = s.countdownMs;
+      }
+      return { type: 'room/setSettings', settings };
     }
     case 'game/start':
       return typeof msg.hardMode === 'boolean'

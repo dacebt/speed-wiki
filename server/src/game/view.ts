@@ -8,6 +8,7 @@ export function toRoomSync(room: CoreRoom): RoomSync {
     phase: room.phase,
     round: room.round,
     countdownEndsAt: room.countdownEndsAt,
+    settings: room.settings,
     players: room.players.map((p) => ({
       id: p.id,
       name: p.name,

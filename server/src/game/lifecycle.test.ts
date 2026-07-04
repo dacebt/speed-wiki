@@ -111,6 +111,50 @@ describe('host transfer on a player leaving', () => {
   });
 });
 
+describe('room settings', () => {
+  test('a host-set round length flows into the round deadline', () => {
+    let room = seedPlayers('host', 'guest');
+    room = apply(
+      room,
+      client('host', { type: 'room/setSettings', settings: { roundDurationMs: 3 * 60_000 } }),
+    ).room;
+    expect(room.settings.roundDurationMs).toBe(3 * 60_000);
+    room = startRacing(room, { at: 0 });
+    expect(room.round!.deadline - room.round!.startedAt).toBe(3 * 60_000);
+  });
+
+  test('merges a partial patch without clobbering the other knob', () => {
+    let room = seedPlayers('host');
+    room = apply(
+      room,
+      client('host', { type: 'room/setSettings', settings: { roundDurationMs: 5 * 60_000 } }),
+    ).room;
+    room = apply(
+      room,
+      client('host', { type: 'room/setSettings', settings: { countdownMs: 5_000 } }),
+    ).room;
+    expect(room.settings).toEqual({ roundDurationMs: 5 * 60_000, countdownMs: 5_000 });
+  });
+
+  test('rejects out-of-range settings instead of clamping', () => {
+    const room = seedPlayers('host');
+    const decision = decide(
+      room,
+      client('host', { type: 'room/setSettings', settings: { countdownMs: 60_000 } }),
+    );
+    expect(decision).toMatchObject({ ok: false, code: 'invalid-settings' });
+  });
+
+  test('rejects a settings change from a non-host', () => {
+    const room = seedPlayers('host', 'guest');
+    const decision = decide(
+      room,
+      client('guest', { type: 'room/setSettings', settings: { countdownMs: 5_000 } }),
+    );
+    expect(decision).toMatchObject({ ok: false, code: 'not-host' });
+  });
+});
+
 describe('away racer round end', () => {
   test('holds the round while a racer is away, then ends it when the grace window removes them', () => {
     const room = startRacing(seedPlayers('a', 'b'), { goal: 'Goal', at: 0 });

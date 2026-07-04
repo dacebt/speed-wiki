@@ -1,4 +1,4 @@
-import { FACES, HATS, type PlayerView } from '@wikispeedrun/shared';
+import { FACES, HATS, type PlayerView, type RoomSettings } from '@wikispeedrun/shared';
 import { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../../app/store';
 import { Avatar } from '../../components/Avatar';
@@ -63,6 +63,8 @@ export function LobbyScreen() {
       </section>
 
       {me && <CosmeticsPicker me={me} />}
+
+      <RoundSettings settings={room.settings} isHost={isHost} />
 
       <section className="lobby__actions">
         {isHost ? (
@@ -149,6 +151,79 @@ function PlayerCard({
         </button>
       )}
     </li>
+  );
+}
+
+const ROUND_PRESETS = [
+  { label: '3 min', ms: 3 * 60_000 },
+  { label: '5 min', ms: 5 * 60_000 },
+  { label: '10 min', ms: 10 * 60_000 },
+] as const;
+
+const COUNTDOWN_PRESETS = [
+  { label: '5s', ms: 5_000 },
+  { label: '10s', ms: 10_000 },
+] as const;
+
+// Every player sees the chosen pace; only the host can change it. The host sends
+// just the changed knob — the core merges it — so quick successive edits can't
+// clobber each other by shipping a full object built from a stale render.
+function RoundSettings({ settings, isHost }: { settings: RoomSettings; isHost: boolean }) {
+  function choose(patch: Partial<RoomSettings>) {
+    sendIntent({ type: 'room/setSettings', settings: patch });
+  }
+
+  return (
+    <section className="panel lobby__settings">
+      <span className="label">Round settings</span>
+      <SettingRow
+        name="Round length"
+        presets={ROUND_PRESETS}
+        current={settings.roundDurationMs}
+        isHost={isHost}
+        onPick={(ms) => choose({ roundDurationMs: ms })}
+      />
+      <SettingRow
+        name="Countdown"
+        presets={COUNTDOWN_PRESETS}
+        current={settings.countdownMs}
+        isHost={isHost}
+        onPick={(ms) => choose({ countdownMs: ms })}
+      />
+      {!isHost && <span className="flavor lobby__settings-hint">The host sets the pace.</span>}
+    </section>
+  );
+}
+
+function SettingRow({
+  name,
+  presets,
+  current,
+  isHost,
+  onPick,
+}: {
+  name: string;
+  presets: readonly { label: string; ms: number }[];
+  current: number;
+  isHost: boolean;
+  onPick: (ms: number) => void;
+}) {
+  return (
+    <div className="lobby__setting">
+      <span className="lobby__setting-name">{name}</span>
+      <div className="lobby__preset-row">
+        {presets.map((p) => (
+          <button
+            key={p.ms}
+            className={`lobby__preset ${current === p.ms ? 'lobby__preset--active' : ''}`}
+            disabled={!isHost}
+            onClick={() => onPick(p.ms)}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -3,6 +3,40 @@ import type { PlayerCosmetics } from './cosmetics.js';
 // The full room state the server broadcasts on every change. Clients render
 // this and nothing else — no client-side authority.
 
+// RoomSettings — the single home for every host-tunable knob. Set in the lobby
+// before Start, carried into the round, and read by the core in place of module
+// constants. Later capabilities (difficulty, category) extend this same object,
+// so it is designed to grow, not be replaced. Durations enter the core as data:
+// deadlines are still (server start time + a setting), so no clock lives there.
+export interface RoomSettings {
+  roundDurationMs: number;
+  countdownMs: number;
+}
+
+export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
+  roundDurationMs: 10 * 60_000,
+  countdownMs: 10_000,
+};
+
+// Accepted ranges; the core rejects out-of-range settings rather than clamping.
+const ROUND_DURATION_MIN_MS = 60_000; // 1 min
+const ROUND_DURATION_MAX_MS = 30 * 60_000; // 30 min
+const COUNTDOWN_MIN_MS = 3_000; // 3 s
+const COUNTDOWN_MAX_MS = 15_000; // 15 s
+
+/** Domain validity of host-chosen settings — mirrors isValidCosmetics; the core
+    uses it to reject rather than silently coerce out-of-range values. */
+export function isRoomSettingsInRange(s: RoomSettings): boolean {
+  return (
+    Number.isFinite(s.roundDurationMs) &&
+    Number.isFinite(s.countdownMs) &&
+    s.roundDurationMs >= ROUND_DURATION_MIN_MS &&
+    s.roundDurationMs <= ROUND_DURATION_MAX_MS &&
+    s.countdownMs >= COUNTDOWN_MIN_MS &&
+    s.countdownMs <= COUNTDOWN_MAX_MS
+  );
+}
+
 // Listed at runtime so the client boundary can check membership; the RoomPhase
 // type is derived from this list, keeping it the single source of truth.
 export const ROOM_PHASES = ['lobby', 'countdown', 'racing', 'results'] as const;
@@ -51,6 +85,8 @@ export interface RoomSync {
   round: RoundView | null;
   /** Server epoch ms when the countdown ends; present only in countdown phase. */
   countdownEndsAt: number | null;
+  /** Host-chosen knobs, edited in the lobby and applied at Start. */
+  settings: RoomSettings;
 }
 
 export const MAX_NAME_LENGTH = 20;

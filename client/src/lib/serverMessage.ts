@@ -4,6 +4,7 @@ import {
   type ErrorCode,
   type PlayerCosmetics,
   type PlayerView,
+  type RoomSettings,
   type RoomSync,
   type RoundView,
   type ServerMessage,
@@ -67,6 +68,14 @@ function isRoundView(value: unknown): value is RoundView {
   );
 }
 
+function isRoomSettings(value: unknown): value is RoomSettings {
+  return (
+    isRecord(value) &&
+    typeof value.roundDurationMs === 'number' &&
+    typeof value.countdownMs === 'number'
+  );
+}
+
 function isRoomSync(value: unknown): value is RoomSync {
   return (
     isRecord(value) &&
@@ -75,7 +84,8 @@ function isRoomSync(value: unknown): value is RoomSync {
     Array.isArray(value.players) &&
     value.players.every(isPlayerView) &&
     (value.round === null || isRoundView(value.round)) &&
-    isNumberOrNull(value.countdownEndsAt)
+    isNumberOrNull(value.countdownEndsAt) &&
+    isRoomSettings(value.settings)
   );
 }
 

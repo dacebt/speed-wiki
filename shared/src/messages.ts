@@ -1,5 +1,5 @@
 import type { PlayerCosmetics } from './cosmetics.js';
-import type { RoomSync } from './room.js';
+import type { RoomSettings, RoomSync } from './room.js';
 
 // Every client→server intent and server→client message, defined once.
 // Clients send intents; the server decides; clients render what they're told.
@@ -11,6 +11,10 @@ export type ClientIntent =
   | { type: 'room/create'; playerName: string; playerId: string }
   | { type: 'room/join'; code: string; playerName: string; playerId: string }
   | { type: 'player/setCosmetics'; cosmetics: PlayerCosmetics }
+  // A partial patch: the host changes one knob at a time and the core merges it
+  // into the room's settings, so two quick edits can't clobber each other by
+  // each carrying a full object built from stale state.
+  | { type: 'room/setSettings'; settings: Partial<RoomSettings> }
   | { type: 'game/start'; hardMode: boolean }
   | { type: 'race/hop'; article: string }
   | { type: 'race/giveUp' }
@@ -26,6 +30,7 @@ export const ERROR_CODES = [
   'not-host',
   'not-in-room',
   'wrong-phase',
+  'invalid-settings',
   'article-fetch-failed',
   /** Sent to a player the host removed from the lobby; the client clears its
       room and returns to Home. */

@@ -1,4 +1,4 @@
-import type { PlayerCosmetics } from '@wikispeedrun/shared';
+import type { PlayerCosmetics, RoomSettings } from '@wikispeedrun/shared';
 
 // Everything that can happen to a room. State is a pure fold over these.
 // Timestamps are server-assigned and arrive as data on the event.
@@ -12,6 +12,7 @@ export type RoomEvent =
   | { type: 'PlayerAway'; playerId: string; at: number }
   | { type: 'PlayerReconnected'; playerId: string; at: number }
   | { type: 'CosmeticsSet'; playerId: string; cosmetics: PlayerCosmetics; at: number }
+  | { type: 'SettingsChanged'; settings: RoomSettings; at: number }
   | { type: 'CountdownStarted'; endsAt: number; hardMode: boolean; at: number }
   | {
       type: 'RoundStarted';

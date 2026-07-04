@@ -1,5 +1,5 @@
-import type { ClientIntent } from '@wikispeedrun/shared';
-import { COUNTDOWN_MS, decide, type CoreIntent } from './decide.js';
+import { DEFAULT_ROOM_SETTINGS, type ClientIntent } from '@wikispeedrun/shared';
+import { decide, type CoreIntent } from './decide.js';
 import type { RoomEvent } from './events.js';
 import { reduce } from './reduce.js';
 import { initialRoom, type CoreRoom } from './state.js';
@@ -46,6 +46,6 @@ export function startRacing(
     kind: 'sys/countdownFinished',
     startArticle: start,
     goalArticle: goal,
-    at: at + COUNTDOWN_MS,
+    at: at + DEFAULT_ROOM_SETTINGS.countdownMs,
   }).room;
 }
