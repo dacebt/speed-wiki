@@ -1,4 +1,5 @@
 import {
+  DIFFICULTIES,
   ERROR_CODES,
   ROOM_PHASES,
   type ErrorCode,
@@ -62,7 +63,6 @@ function isRoundView(value: unknown): value is RoundView {
     typeof value.roundNumber === 'number' &&
     typeof value.startArticle === 'string' &&
     typeof value.goalArticle === 'string' &&
-    typeof value.hardMode === 'boolean' &&
     typeof value.startedAt === 'number' &&
     typeof value.deadline === 'number'
   );
@@ -72,7 +72,8 @@ function isRoomSettings(value: unknown): value is RoomSettings {
   return (
     isRecord(value) &&
     typeof value.roundDurationMs === 'number' &&
-    typeof value.countdownMs === 'number'
+    typeof value.countdownMs === 'number' &&
+    (DIFFICULTIES as readonly string[]).includes(value.difficulty as string)
   );
 }
 

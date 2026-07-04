@@ -23,7 +23,10 @@ export type CoreIntent =
   // A dropped socket marks the player away (slot held); a lapsed grace window
   // finally removes them. The shell owns the grace timer — see registry.ts.
   | { kind: 'sys/playerAway'; playerId: string; at: number }
-  | { kind: 'sys/playerLeft'; playerId: string; at: number };
+  | { kind: 'sys/playerLeft'; playerId: string; at: number }
+  // Article selection for the pending round failed (e.g. random unreachable);
+  // abort the countdown back to the lobby instead of starting a bad round.
+  | { kind: 'sys/roundStartFailed'; at: number };
 
 export type Decision =
   { ok: true; events: RoomEvent[] } | { ok: false; code: ErrorCode; message: string };
@@ -43,7 +46,6 @@ export function decide(room: CoreRoom, intent: CoreIntent): Decision {
             roundNumber,
             startArticle: intent.startArticle,
             goalArticle: intent.goalArticle,
-            hardMode: room.pendingHardMode,
             startedAt: intent.at,
             deadline: intent.at + room.settings.roundDurationMs,
           },
@@ -53,6 +55,10 @@ export function decide(room: CoreRoom, intent: CoreIntent): Decision {
     case 'sys/roundTimedOut': {
       if (room.phase !== 'racing') return { ok: true, events: [] };
       return { ok: true, events: [endRound(room, intent.at)] };
+    }
+    case 'sys/roundStartFailed': {
+      if (room.phase !== 'countdown') return { ok: true, events: [] };
+      return { ok: true, events: [{ type: 'CountdownAborted', at: intent.at }] };
     }
     case 'sys/playerAway': {
       // Hold the slot: mark away rather than removing, so a rejoin reattaches.
@@ -148,7 +154,7 @@ function decideClient(
           {
             type: 'CountdownStarted',
             endsAt: at + room.settings.countdownMs,
-            hardMode: intent.hardMode,
+            difficulty: room.settings.difficulty,
             at,
           },
         ],

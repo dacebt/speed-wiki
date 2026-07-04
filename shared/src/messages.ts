@@ -15,7 +15,8 @@ export type ClientIntent =
   // into the room's settings, so two quick edits can't clobber each other by
   // each carrying a full object built from stale state.
   | { type: 'room/setSettings'; settings: Partial<RoomSettings> }
-  | { type: 'game/start'; hardMode: boolean }
+  // No payload: difficulty and the durations are read from the room's settings.
+  | { type: 'game/start' }
   | { type: 'race/hop'; article: string }
   | { type: 'race/giveUp' }
   | { type: 'game/playAgain' }

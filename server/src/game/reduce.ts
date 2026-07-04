@@ -51,12 +51,10 @@ export function reduce(room: CoreRoom, event: RoomEvent): CoreRoom {
       return { ...room, settings: event.settings };
 
     case 'CountdownStarted':
-      return {
-        ...room,
-        phase: 'countdown',
-        countdownEndsAt: event.endsAt,
-        pendingHardMode: event.hardMode,
-      };
+      return { ...room, phase: 'countdown', countdownEndsAt: event.endsAt };
+
+    case 'CountdownAborted':
+      return { ...room, phase: 'lobby', countdownEndsAt: null, round: null };
 
     case 'RoundStarted':
       return {
@@ -67,7 +65,6 @@ export function reduce(room: CoreRoom, event: RoomEvent): CoreRoom {
           roundNumber: event.roundNumber,
           startArticle: event.startArticle,
           goalArticle: event.goalArticle,
-          hardMode: event.hardMode,
           startedAt: event.startedAt,
           deadline: event.deadline,
         },

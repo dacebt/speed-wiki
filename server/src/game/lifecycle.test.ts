@@ -6,19 +6,19 @@ import { apply, client, seedPlayers, startRacing } from './harness.js';
 describe('phase guards', () => {
   test('rejects start from a player who is not the host', () => {
     const room = seedPlayers('host', 'guest');
-    const decision = decide(room, client('guest', { type: 'game/start', hardMode: false }));
+    const decision = decide(room, client('guest', { type: 'game/start' }));
     expect(decision).toMatchObject({ ok: false, code: 'not-host' });
   });
 
   test('rejects start once a race is already underway', () => {
     const room = startRacing(seedPlayers('host', 'guest'));
-    const decision = decide(room, client('host', { type: 'game/start', hardMode: false }));
+    const decision = decide(room, client('host', { type: 'game/start' }));
     expect(decision).toMatchObject({ ok: false, code: 'wrong-phase' });
   });
 
   test('rejects an intent from a player who is not in the room', () => {
     const room = seedPlayers('host');
-    const decision = decide(room, client('stranger', { type: 'game/start', hardMode: false }));
+    const decision = decide(room, client('stranger', { type: 'game/start' }));
     expect(decision).toMatchObject({ ok: false, code: 'not-in-room' });
   });
 
@@ -133,7 +133,11 @@ describe('room settings', () => {
       room,
       client('host', { type: 'room/setSettings', settings: { countdownMs: 5_000 } }),
     ).room;
-    expect(room.settings).toEqual({ roundDurationMs: 5 * 60_000, countdownMs: 5_000 });
+    expect(room.settings).toEqual({
+      roundDurationMs: 5 * 60_000,
+      countdownMs: 5_000,
+      difficulty: 'curated',
+    });
   });
 
   test('rejects out-of-range settings instead of clamping', () => {
@@ -152,6 +156,28 @@ describe('room settings', () => {
       client('guest', { type: 'room/setSettings', settings: { countdownMs: 5_000 } }),
     );
     expect(decision).toMatchObject({ ok: false, code: 'not-host' });
+  });
+});
+
+describe('difficulty', () => {
+  test('the chosen difficulty is what the countdown carries into article selection', () => {
+    let room = seedPlayers('host');
+    room = apply(
+      room,
+      client('host', { type: 'room/setSettings', settings: { difficulty: 'random' } }),
+    ).room;
+    const { events } = apply(room, client('host', { type: 'game/start' }, 0));
+    expect(events.find((e) => e.type === 'CountdownStarted')).toMatchObject({
+      difficulty: 'random',
+    });
+  });
+
+  test('a failed round start aborts the countdown back to the lobby, not into a bad round', () => {
+    let room = apply(seedPlayers('host'), client('host', { type: 'game/start' }, 0)).room;
+    expect(room.phase).toBe('countdown');
+    room = apply(room, { kind: 'sys/roundStartFailed', at: 1000 }).room;
+    expect(room.phase).toBe('lobby');
+    expect(room.round).toBeNull();
   });
 });
 

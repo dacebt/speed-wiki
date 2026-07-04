@@ -1,4 +1,9 @@
-import type { ClientIntent, RoomSettings } from '@wikispeedrun/shared';
+import {
+  DIFFICULTIES,
+  type ClientIntent,
+  type Difficulty,
+  type RoomSettings,
+} from '@wikispeedrun/shared';
 
 // Boundary validation: anything arriving over the wire is untrusted until it
 // structurally matches a known intent. The core assumes shapes are valid;
@@ -43,12 +48,15 @@ export function parseClientIntent(raw: unknown): ClientIntent | null {
         if (typeof s.countdownMs !== 'number') return null;
         settings.countdownMs = s.countdownMs;
       }
+      if ('difficulty' in s) {
+        if (typeof s.difficulty !== 'string') return null;
+        if (!(DIFFICULTIES as readonly string[]).includes(s.difficulty)) return null;
+        settings.difficulty = s.difficulty as Difficulty;
+      }
       return { type: 'room/setSettings', settings };
     }
     case 'game/start':
-      return typeof msg.hardMode === 'boolean'
-        ? { type: 'game/start', hardMode: msg.hardMode }
-        : null;
+      return { type: 'game/start' };
     case 'race/hop':
       return typeof msg.article === 'string' && msg.article.length > 0 && msg.article.length < 512
         ? { type: 'race/hop', article: msg.article }

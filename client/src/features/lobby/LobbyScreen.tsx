@@ -1,4 +1,10 @@
-import { FACES, HATS, type PlayerView, type RoomSettings } from '@wikispeedrun/shared';
+import {
+  FACES,
+  HATS,
+  type Difficulty,
+  type PlayerView,
+  type RoomSettings,
+} from '@wikispeedrun/shared';
 import { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../../app/store';
 import { Avatar } from '../../components/Avatar';
@@ -7,7 +13,6 @@ import './lobby.css';
 
 export function LobbyScreen() {
   const { room, you } = useAppState();
-  const [hardMode, setHardMode] = useState(false);
   const codeCopy = useCopyFeedback();
   const linkCopy = useCopyFeedback();
   if (!room) return null;
@@ -68,25 +73,12 @@ export function LobbyScreen() {
 
       <section className="lobby__actions">
         {isHost ? (
-          <>
-            <label className="lobby__hardmode">
-              <input
-                type="checkbox"
-                checked={hardMode}
-                onChange={(e) => setHardMode(e.target.checked)}
-              />
-              <span>
-                Hard mode{' '}
-                <span className="flavor">— truly random pages, may the odds be ever grim</span>
-              </span>
-            </label>
-            <button
-              className="btn btn--primary lobby__start"
-              onClick={() => sendIntent({ type: 'game/start', hardMode })}
-            >
-              Start Game
-            </button>
-          </>
+          <button
+            className="btn btn--primary lobby__start"
+            onClick={() => sendIntent({ type: 'game/start' })}
+          >
+            Start Game
+          </button>
         ) : (
           <p className="flavor">Waiting for the host to start…</p>
         )}
@@ -155,17 +147,22 @@ function PlayerCard({
 }
 
 const ROUND_PRESETS = [
-  { label: '3 min', ms: 3 * 60_000 },
-  { label: '5 min', ms: 5 * 60_000 },
-  { label: '10 min', ms: 10 * 60_000 },
+  { label: '3 min', value: 3 * 60_000 },
+  { label: '5 min', value: 5 * 60_000 },
+  { label: '10 min', value: 10 * 60_000 },
 ] as const;
 
 const COUNTDOWN_PRESETS = [
-  { label: '5s', ms: 5_000 },
-  { label: '10s', ms: 10_000 },
+  { label: '5s', value: 5_000 },
+  { label: '10s', value: 10_000 },
 ] as const;
 
-// Every player sees the chosen pace; only the host can change it. The host sends
+const DIFFICULTY_PRESETS: readonly { label: string; value: Difficulty }[] = [
+  { label: 'Curated', value: 'curated' },
+  { label: 'Random', value: 'random' },
+];
+
+// Every player sees the chosen setup; only the host can change it. The host sends
 // just the changed knob — the core merges it — so quick successive edits can't
 // clobber each other by shipping a full object built from a stale render.
 function RoundSettings({ settings, isHost }: { settings: RoomSettings; isHost: boolean }) {
@@ -190,12 +187,24 @@ function RoundSettings({ settings, isHost }: { settings: RoomSettings; isHost: b
         isHost={isHost}
         onPick={(ms) => choose({ countdownMs: ms })}
       />
-      {!isHost && <span className="flavor lobby__settings-hint">The host sets the pace.</span>}
+      <SettingRow
+        name="Difficulty"
+        presets={DIFFICULTY_PRESETS}
+        current={settings.difficulty}
+        isHost={isHost}
+        onPick={(d) => choose({ difficulty: d })}
+      />
+      <span className="flavor lobby__settings-hint">
+        {settings.difficulty === 'random'
+          ? 'Random draws two true-random pages — may the odds be ever grim.'
+          : 'Curated draws from a hand-picked pool of link-rich pages.'}
+        {!isHost && ' The host sets the pace.'}
+      </span>
     </section>
   );
 }
 
-function SettingRow({
+function SettingRow<T extends string | number>({
   name,
   presets,
   current,
@@ -203,10 +212,10 @@ function SettingRow({
   onPick,
 }: {
   name: string;
-  presets: readonly { label: string; ms: number }[];
-  current: number;
+  presets: readonly { label: string; value: T }[];
+  current: T;
   isHost: boolean;
-  onPick: (ms: number) => void;
+  onPick: (value: T) => void;
 }) {
   return (
     <div className="lobby__setting">
@@ -214,10 +223,10 @@ function SettingRow({
       <div className="lobby__preset-row">
         {presets.map((p) => (
           <button
-            key={p.ms}
-            className={`lobby__preset ${current === p.ms ? 'lobby__preset--active' : ''}`}
+            key={p.value}
+            className={`lobby__preset ${current === p.value ? 'lobby__preset--active' : ''}`}
             disabled={!isHost}
-            onClick={() => onPick(p.ms)}
+            onClick={() => onPick(p.value)}
           >
             {p.label}
           </button>

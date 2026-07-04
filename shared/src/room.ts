@@ -3,19 +3,27 @@ import type { PlayerCosmetics } from './cosmetics.js';
 // The full room state the server broadcasts on every change. Clients render
 // this and nothing else — no client-side authority.
 
+// Article difficulty: 'curated' draws a pair from the hand-picked pool;
+// 'random' draws two true-random Wikipedia articles. Listed at runtime so the
+// boundary can check membership; the type is derived from the list.
+export const DIFFICULTIES = ['curated', 'random'] as const;
+export type Difficulty = (typeof DIFFICULTIES)[number];
+
 // RoomSettings — the single home for every host-tunable knob. Set in the lobby
 // before Start, carried into the round, and read by the core in place of module
-// constants. Later capabilities (difficulty, category) extend this same object,
-// so it is designed to grow, not be replaced. Durations enter the core as data:
+// constants. Later capabilities (category) extend this same object, so it is
+// designed to grow, not be replaced. Durations enter the core as data:
 // deadlines are still (server start time + a setting), so no clock lives there.
 export interface RoomSettings {
   roundDurationMs: number;
   countdownMs: number;
+  difficulty: Difficulty;
 }
 
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   roundDurationMs: 10 * 60_000,
   countdownMs: 10_000,
+  difficulty: 'curated',
 };
 
 // Accepted ranges; the core rejects out-of-range settings rather than clamping.
@@ -33,7 +41,8 @@ export function isRoomSettingsInRange(s: RoomSettings): boolean {
     s.roundDurationMs >= ROUND_DURATION_MIN_MS &&
     s.roundDurationMs <= ROUND_DURATION_MAX_MS &&
     s.countdownMs >= COUNTDOWN_MIN_MS &&
-    s.countdownMs <= COUNTDOWN_MAX_MS
+    s.countdownMs <= COUNTDOWN_MAX_MS &&
+    (DIFFICULTIES as readonly string[]).includes(s.difficulty)
   );
 }
 
@@ -70,7 +79,6 @@ export interface RoundView {
   roundNumber: number;
   startArticle: string;
   goalArticle: string;
-  hardMode: boolean;
   /** Server epoch ms when racing began. */
   startedAt: number;
   /** Server epoch ms when the round times out. */
