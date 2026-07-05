@@ -11,19 +11,27 @@ import {
 // structurally matches a known intent. The core assumes shapes are valid;
 // this is the only place that guarantee is established.
 
+// The client generates its own playerId (a UUID). It's untrusted, becomes a map
+// key and an event-log entry, so it gets the same length contract as any other
+// wire string — an honest id is ~36 chars; anything past this is not one.
+const MAX_PLAYER_ID_LENGTH = 64;
+function isPlayerId(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0 && v.length <= MAX_PLAYER_ID_LENGTH;
+}
+
 export function parseClientIntent(raw: unknown): ClientIntent | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const msg = raw as Record<string, unknown>;
 
   switch (msg.type) {
     case 'room/create':
-      return typeof msg.playerName === 'string' && typeof msg.playerId === 'string'
+      return typeof msg.playerName === 'string' && isPlayerId(msg.playerId)
         ? { type: 'room/create', playerName: msg.playerName, playerId: msg.playerId }
         : null;
     case 'room/join':
       return typeof msg.code === 'string' &&
         typeof msg.playerName === 'string' &&
-        typeof msg.playerId === 'string'
+        isPlayerId(msg.playerId)
         ? { type: 'room/join', code: msg.code, playerName: msg.playerName, playerId: msg.playerId }
         : null;
     case 'player/setCosmetics': {
