@@ -2,7 +2,9 @@ import { toRoomSync } from '@wikispeedrun/game';
 import type {
   ClientIntent,
   ErrorCode,
+  PlayerCosmetics,
   RoomConnectMessage,
+  RoomSettingsPatch,
   ServerMessage,
 } from '@wikispeedrun/shared';
 import { WEBSOCKET_MESSAGE_BYTE_LIMIT } from '@wikispeedrun/shared';
@@ -59,7 +61,13 @@ export function parseConnectMessage(raw: string | ArrayBuffer): RoomConnectMessa
 }
 
 type SupportedIntentType =
-  'game/start' | 'race/hop' | 'race/giveUp' | 'game/playAgain' | 'room/kick';
+  | 'game/start'
+  | 'race/hop'
+  | 'race/giveUp'
+  | 'game/playAgain'
+  | 'room/kick'
+  | 'player/setCosmetics'
+  | 'room/setSettings';
 export type WorkerPlayerIntent = Extract<ClientIntent, { type: SupportedIntentType }>;
 export type AuthenticatedRoomMessage = WorkerPlayerIntent | 'unsupported' | 'invalid';
 
@@ -92,6 +100,18 @@ export function parseAuthenticatedMessage(raw: string | ArrayBuffer): Authentica
           isUuid(record.playerId)
           ? { type: 'room/kick', playerId: record.playerId }
           : 'invalid';
+      case 'player/setCosmetics': {
+        const cosmetics = parseCosmetics(record.cosmetics);
+        return hasExactKeys(record, ['type', 'cosmetics']) && cosmetics
+          ? { type: 'player/setCosmetics', cosmetics }
+          : 'invalid';
+      }
+      case 'room/setSettings': {
+        const settings = parseSettingsPatch(record.settings);
+        return hasExactKeys(record, ['type', 'settings']) && settings
+          ? { type: 'room/setSettings', settings }
+          : 'invalid';
+      }
       default:
         return typeof record.type === 'string' ? 'unsupported' : 'invalid';
     }
@@ -143,6 +163,53 @@ export function rejectSocket(
 function hasExactKeys(record: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(record);
   return actual.length === keys.length && actual.every((key) => keys.includes(key));
+}
+
+function parseCosmetics(value: unknown): PlayerCosmetics | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (
+    !hasExactKeys(record, ['faceId', 'hatId']) ||
+    typeof record.faceId !== 'string' ||
+    typeof record.hatId !== 'string'
+  ) {
+    return null;
+  }
+  return { faceId: record.faceId, hatId: record.hatId };
+}
+
+function parseSettingsPatch(value: unknown): RoomSettingsPatch | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  const allowedKeys: readonly string[] = [
+    'roundDurationMs',
+    'countdownMs',
+    'difficulty',
+    'category',
+  ];
+  if (keys.length === 0 || !keys.every((key) => allowedKeys.includes(key))) {
+    return null;
+  }
+
+  const settings: RoomSettingsPatch = {};
+  if ('roundDurationMs' in record) {
+    if (typeof record.roundDurationMs !== 'number') return null;
+    settings.roundDurationMs = record.roundDurationMs;
+  }
+  if ('countdownMs' in record) {
+    if (typeof record.countdownMs !== 'number') return null;
+    settings.countdownMs = record.countdownMs;
+  }
+  if ('difficulty' in record) {
+    if (typeof record.difficulty !== 'string') return null;
+    settings.difficulty = record.difficulty;
+  }
+  if ('category' in record) {
+    if (typeof record.category !== 'string') return null;
+    settings.category = record.category;
+  }
+  return settings;
 }
 
 function isUuid(value: string): boolean {

@@ -58,12 +58,16 @@ export async function processPlayerIntent(
     }
 
     const room = decision.events.reduce(reduce, current.room);
-    const deadlines =
-      room.phase === 'racing' ? current.deadlines : replacePhaseDeadline(current.deadlines, null);
+    const samePhase = room.phase === current.room.phase;
+    const deadlines = samePhase
+      ? current.deadlines
+      : room.phase === 'racing'
+        ? current.deadlines
+        : replacePhaseDeadline(current.deadlines, null);
     const next: RoomSnapshot = {
       ...current,
       room,
-      roundPreparation: null,
+      roundPreparation: samePhase ? current.roundPreparation : null,
       deadlines,
     };
     parseRoomSnapshot(next);

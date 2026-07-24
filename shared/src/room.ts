@@ -27,6 +27,22 @@ export interface RoomSettings {
   category: Category;
 }
 
+/** Shape-valid host settings received before the core applies domain rules. */
+export interface RoomSettingsPatch {
+  roundDurationMs?: number;
+  countdownMs?: number;
+  difficulty?: string;
+  category?: string;
+}
+
+/** A complete settings value whose catalog strings have not yet been validated. */
+export interface RoomSettingsCandidate {
+  roundDurationMs: number;
+  countdownMs: number;
+  difficulty: string;
+  category: string;
+}
+
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   roundDurationMs: 10 * 60_000,
   countdownMs: 10_000,
@@ -42,10 +58,10 @@ const COUNTDOWN_MAX_MS = 15_000; // 15 s
 
 /** Domain validity of host-chosen settings — mirrors isValidCosmetics; the core
     uses it to reject rather than silently coerce out-of-range values. */
-export function isRoomSettingsInRange(s: RoomSettings): boolean {
+export function isRoomSettingsInRange(s: RoomSettingsCandidate): s is RoomSettings {
   return (
-    Number.isFinite(s.roundDurationMs) &&
-    Number.isFinite(s.countdownMs) &&
+    Number.isSafeInteger(s.roundDurationMs) &&
+    Number.isSafeInteger(s.countdownMs) &&
     s.roundDurationMs >= ROUND_DURATION_MIN_MS &&
     s.roundDurationMs <= ROUND_DURATION_MAX_MS &&
     s.countdownMs >= COUNTDOWN_MIN_MS &&

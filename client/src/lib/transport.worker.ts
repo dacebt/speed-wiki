@@ -28,7 +28,7 @@ import {
 } from './transportTypes.js';
 
 export const supportsInvitedJoining = true;
-export const supportsLobbyActions = false;
+export const supportsLobbyActions = true;
 export const supportsRoundStart = true;
 export const supportsRaceActions = true;
 export const supportsKick = true;

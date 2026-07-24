@@ -97,10 +97,93 @@ describe('Room Connection exact validation', () => {
         JSON.stringify({ type: 'room/kick', playerId: PLAYER_ID, extra: true }),
       ),
     ).toBe('invalid');
-    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'room/setSettings' }))).toBe(
-      'unsupported',
-    );
+    expect(
+      parseAuthenticatedMessage(
+        JSON.stringify({
+          type: 'player/setCosmetics',
+          cosmetics: { faceId: 'unknown-face', hatId: 'unknown-hat' },
+        }),
+      ),
+    ).toEqual({
+      type: 'player/setCosmetics',
+      cosmetics: { faceId: 'unknown-face', hatId: 'unknown-hat' },
+    });
+    expect(
+      parseAuthenticatedMessage(
+        JSON.stringify({
+          type: 'room/setSettings',
+          settings: {
+            roundDurationMs: 180_000,
+            countdownMs: 5_000,
+            difficulty: 'curated',
+            category: 'history',
+          },
+        }),
+      ),
+    ).toEqual({
+      type: 'room/setSettings',
+      settings: {
+        roundDurationMs: 180_000,
+        countdownMs: 5_000,
+        difficulty: 'curated',
+        category: 'history',
+      },
+    });
+    expect(
+      parseAuthenticatedMessage(
+        JSON.stringify({
+          type: 'room/setSettings',
+          settings: { roundDurationMs: 1 },
+        }),
+      ),
+    ).toEqual({
+      type: 'room/setSettings',
+      settings: { roundDurationMs: 1 },
+    });
+    expect(
+      parseAuthenticatedMessage(
+        JSON.stringify({
+          type: 'room/setSettings',
+          settings: { difficulty: 'impossible', category: 'literature' },
+        }),
+      ),
+    ).toEqual({
+      type: 'room/setSettings',
+      settings: { difficulty: 'impossible', category: 'literature' },
+    });
     expect(parseAuthenticatedMessage(new ArrayBuffer(0))).toBe('invalid');
+  });
+
+  test('rejects malformed cosmetics and settings frames at the authenticated boundary', () => {
+    const invalidMessages = [
+      { type: 'player/setCosmetics' },
+      { type: 'player/setCosmetics', cosmetics: { faceId: 'owl' } },
+      {
+        type: 'player/setCosmetics',
+        cosmetics: { faceId: 'owl', hatId: 'crown', extra: true },
+      },
+      { type: 'player/setCosmetics', cosmetics: { faceId: 7, hatId: 'crown' } },
+      { type: 'player/setCosmetics', cosmetics: { faceId: 'owl', hatId: 7 } },
+      {
+        type: 'player/setCosmetics',
+        cosmetics: { faceId: 'owl', hatId: 'crown' },
+        extra: true,
+      },
+      { type: 'room/setSettings' },
+      { type: 'room/setSettings', settings: {} },
+      { type: 'room/setSettings', settings: { countdownMs: '5000' } },
+      { type: 'room/setSettings', settings: { difficulty: 7 } },
+      { type: 'room/setSettings', settings: { category: false } },
+      { type: 'room/setSettings', settings: { countdownMs: 5_000, extra: true } },
+      {
+        type: 'room/setSettings',
+        settings: { countdownMs: 5_000 },
+        extra: true,
+      },
+    ];
+    for (const message of invalidMessages) {
+      expect(parseAuthenticatedMessage(JSON.stringify(message))).toBe('invalid');
+    }
   });
 
   test('reject closes a socket even when the structured error cannot be sent', () => {

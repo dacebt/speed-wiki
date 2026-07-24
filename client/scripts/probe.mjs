@@ -1,5 +1,6 @@
 import { accessSync, constants } from 'node:fs';
 import { chromium } from 'playwright-core';
+import { configureLobby } from './probeLobby.mjs';
 
 const baseUrl = process.env.BASE_URL ?? 'http://127.0.0.1:5173';
 const browser = await launchInstalledBrowser();
@@ -64,12 +65,8 @@ try {
   ) {
     throw new Error('Rendered one-player lobby did not identify its host.');
   }
-  if (
-    (await page.getByRole('button', { name: 'Start Game' }).count()) !== 1 ||
-    (await page.getByText('Choose your portrait', { exact: true }).count()) !== 0 ||
-    (await page.getByText('Round settings', { exact: true }).count()) !== 0
-  ) {
-    throw new Error('Worker lobby did not expose only its implemented Start action.');
+  if ((await page.getByRole('button', { name: 'Start Game' }).count()) !== 1) {
+    throw new Error('Worker lobby did not expose its implemented Start action.');
   }
   if ((await page.getByRole('button', { name: 'Copy invite link' }).count()) !== 1) {
     throw new Error('Worker lobby did not expose its invite path.');
@@ -135,6 +132,8 @@ try {
     throw new Error('Invited non-host browser exposed the host Start action.');
   }
   await guestPage.getByText('Waiting for the host to start…', { exact: true }).waitFor();
+
+  const lobbyActions = await configureLobby(page, guestPage);
 
   const hostPreparing = page.getByRole('heading', { name: 'Choosing articles' }).waitFor();
   const guestPreparing = guestPage.getByRole('heading', { name: 'Choosing articles' }).waitFor();
@@ -251,6 +250,7 @@ try {
       joined: true,
       reconnected: true,
       identitiesPreserved,
+      lobbyActions,
       prepared,
       alarmTransitioned: true,
       resultRows: hostRows,

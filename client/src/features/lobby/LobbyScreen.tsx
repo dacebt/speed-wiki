@@ -1,6 +1,4 @@
 import {
-  FACES,
-  HATS,
   type Category,
   type Difficulty,
   type PlayerView,
@@ -16,6 +14,7 @@ import {
   supportsLobbyActions,
   supportsRoundStart,
 } from '../../lib/transport';
+import { CosmeticsPicker } from './CosmeticsPicker';
 import './lobby.css';
 
 export function LobbyScreen() {
@@ -273,44 +272,5 @@ function SettingRow<T extends string | number>({
         ))}
       </div>
     </div>
-  );
-}
-
-function CosmeticsPicker({ me }: { me: PlayerView }) {
-  function pick(part: 'faceId' | 'hatId', id: string) {
-    sendIntent({
-      type: 'player/setCosmetics',
-      cosmetics: { ...me.cosmetics, [part]: id },
-    });
-  }
-
-  return (
-    <section className="panel lobby__cosmetics">
-      <span className="label">Choose your portrait</span>
-      <div className="lobby__cosmetic-row">
-        {FACES.map((f) => (
-          <button
-            key={f.id}
-            title={f.label}
-            className={`lobby__swatch ${me.cosmetics.faceId === f.id ? 'lobby__swatch--active' : ''}`}
-            onClick={() => pick('faceId', f.id)}
-          >
-            {f.glyph}
-          </button>
-        ))}
-      </div>
-      <div className="lobby__cosmetic-row">
-        {HATS.map((h) => (
-          <button
-            key={h.id}
-            title={h.label}
-            className={`lobby__swatch ${me.cosmetics.hatId === h.id ? 'lobby__swatch--active' : ''}`}
-            onClick={() => pick('hatId', h.id)}
-          >
-            {h.glyph === '' ? '∅' : h.glyph}
-          </button>
-        ))}
-      </div>
-    </section>
   );
 }
