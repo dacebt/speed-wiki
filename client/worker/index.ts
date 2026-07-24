@@ -20,6 +20,21 @@ export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
     try {
+      if (url.pathname === '/health') {
+        return request.method === 'GET'
+          ? jsonResponse({ ok: true }, 200)
+          : jsonResponse(
+              {
+                error: {
+                  code: 'invalid-request',
+                  message: 'Health accepts GET only.',
+                },
+              } satisfies ApiErrorResponse,
+              405,
+              { Allow: 'GET' },
+            );
+      }
+
       if (request.method === 'POST' && url.pathname === '/api/rooms') {
         return await createRoom(request, env);
       }
@@ -161,6 +176,13 @@ function errorResponse(status: number, code: ErrorCode, message: string): Respon
   return jsonResponse({ error: { code, message } } satisfies ApiErrorResponse, status);
 }
 
-function jsonResponse(body: unknown, status: number): Response {
-  return Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
+function jsonResponse(
+  body: unknown,
+  status: number,
+  headers: Record<string, string> = {},
+): Response {
+  return Response.json(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store', ...headers },
+  });
 }

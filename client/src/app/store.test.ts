@@ -23,7 +23,7 @@ describe('transport disconnect state', () => {
     });
   });
 
-  test('legacy recoverable disconnect keeps the Room while reconnecting', () => {
+  test('recoverable disconnect keeps the Room while reconnecting', () => {
     const next = reduceAppState(inRoom(), {
       type: 'socket/disconnected',
       disconnect: { type: 'reconnecting' },
@@ -36,7 +36,7 @@ describe('transport disconnect state', () => {
 
   test('a hop-limit error stays visible without removing the Player from the Room', () => {
     const next = reduceAppState(inRoom(), {
-      type: 'server/message',
+      type: 'room/message',
       message: {
         type: 'room/error',
         code: 'hop-limit-reached',

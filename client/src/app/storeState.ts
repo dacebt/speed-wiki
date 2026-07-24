@@ -16,7 +16,7 @@ export interface AppState {
 export type AppEvent =
   | { type: 'socket/connected' }
   | { type: 'socket/disconnected'; disconnect: TransportDisconnect }
-  | { type: 'server/message'; message: ServerMessage; receivedAt: number }
+  | { type: 'room/message'; message: ServerMessage; receivedAt: number }
   | { type: 'ui/dismissNotice' }
   | { type: 'ui/notice'; code: ErrorCode; message: string };
 
@@ -63,7 +63,7 @@ export function reduceAppState(state: AppState, event: AppEvent): AppState {
           }
         : { ...state, connected: false, reconnecting: true };
     }
-    case 'server/message': {
+    case 'room/message': {
       const { message } = event;
       if (message.type === 'room/sync') {
         return {

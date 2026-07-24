@@ -9,4 +9,4 @@ export {
   supportsKick,
   supportsRaceActions,
   supportsRoundStart,
-} from '@runtime-transport';
+} from './transport.worker.js';

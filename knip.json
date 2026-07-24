@@ -3,7 +3,7 @@
   "ignoreDependencies": ["cloudflare"],
   "workspaces": {
     "client": {
-      "entry": ["src/lib/transport.worker.ts", "src/**/*.test.ts", "worker/**/*.test.ts"]
+      "entry": ["deploymentConfig.test.ts", "src/**/*.test.ts", "worker/**/*.test.ts"]
     }
   }
 }

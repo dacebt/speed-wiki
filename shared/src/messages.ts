@@ -13,9 +13,8 @@ export const MEMBERSHIP_MESSAGE_RATE_LIMIT = {
 export const PLAYER_ROUND_HOP_LIMIT = 100;
 
 export type ClientIntent =
-  // The legacy server accepts its client-generated playerId here. The Worker
-  // boundary never trusts this shape for Membership creation: it issues both
-  // public identity and secret credential itself.
+  // Authority shells construct these only after issuing the Player ID. The
+  // browser never gets to choose Worker Membership identity.
   | { type: 'room/create'; playerName: string; playerId: string }
   | { type: 'room/join'; code: string; playerName: string; playerId: string }
   | { type: 'player/setCosmetics'; cosmetics: PlayerCosmetics }
@@ -104,8 +103,3 @@ export type ServerMessage =
       from it so countdowns and deadlines render correctly despite skew. */
   | { type: 'room/sync'; room: RoomSync; you: string; at: number }
   | { type: 'room/error'; code: ErrorCode; message: string };
-
-/** Socket.io event name for client→server intents. */
-export const INTENT_EVENT = 'intent';
-/** Socket.io event name for server→client messages. */
-export const MESSAGE_EVENT = 'message';

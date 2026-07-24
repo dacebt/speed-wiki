@@ -92,7 +92,7 @@ export class RoomDurableObject extends DurableObject<Env> {
         send(socket, {
           type: 'room/error',
           code: 'room-unavailable',
-          message: 'This Room action is not available in the current migration slice.',
+          message: 'This Room action is not available in this Room runtime.',
         });
       } else if (message.type === 'game/start') {
         await this.startRoundPreparation(socket, attachment.playerId, attachment.connectionId);

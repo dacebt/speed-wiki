@@ -4,26 +4,24 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "pnpm dev:legacy",
-    "dev:legacy": "vite --mode legacy",
-    "dev:worker": "vite --mode worker",
-    "build": "pnpm build:worker",
-    "build:worker": "tsc -b && vite build --mode worker",
+    "dev": "vite",
+    "build": "node scripts/clean-dist.mjs && tsc -b && vite build",
     "build:analyze": "ANALYZE=1 vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "types:worker": "wrangler types worker-configuration.d.ts --config wrangler.jsonc",
-    "test:worker": "vitest run --config vitest.worker.config.ts",
-    "probe:worker": "node scripts/probe-worker.mjs",
-    "smoke:worker": "node scripts/smoke-worker.mjs"
+    "types": "wrangler types worker-configuration.d.ts --config wrangler.jsonc",
+    "test": "vitest run --config vitest.worker.config.ts",
+    "probe": "node scripts/probe.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "deploy:dry-run": "wrangler deploy --dry-run --config dist/wiki_speedrun/wrangler.json",
+    "deploy": "wrangler deploy --config dist/wiki_speedrun/wrangler.json"
   },
   "dependencies": {
     "@wikispeedrun/game": "workspace:*",
     "@wikispeedrun/shared": "workspace:*",
     "dompurify": "^3.4.11",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "socket.io-client": "^4.8.3"
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.47.0",

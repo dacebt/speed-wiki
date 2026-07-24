@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 
 const port = process.env.WORKER_PORT ?? '5173';
 const baseUrl = `http://127.0.0.1:${port}`;
-const server = spawn('pnpm', ['dev:worker', '--host', '127.0.0.1', '--port', port], {
+const server = spawn('pnpm', ['dev', '--host', '127.0.0.1', '--port', port], {
   cwd: new URL('..', import.meta.url),
   detached: true,
   env: {
@@ -61,7 +61,7 @@ async function waitUntilReady(url, child) {
 
 function runProbe(url) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, ['scripts/probe-worker.mjs'], {
+    const child = spawn(process.execPath, ['scripts/probe.mjs'], {
       cwd: new URL('..', import.meta.url),
       env: { ...process.env, BASE_URL: url },
       stdio: ['ignore', 'pipe', 'pipe'],

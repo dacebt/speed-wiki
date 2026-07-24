@@ -13,6 +13,10 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['game/src/**/*.test.ts', 'server/src/**/*.test.ts', 'client/src/**/*.test.ts'],
+    include: [
+      'game/src/**/*.test.ts',
+      'client/src/**/*.test.ts',
+      'client/deploymentConfig.test.ts',
+    ],
   },
 });

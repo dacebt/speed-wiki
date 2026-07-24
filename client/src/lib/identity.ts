@@ -1,19 +1,8 @@
-// The legacy runtime's client-generated identity. The Worker runtime instead
-// persists a Room-scoped Membership issued by the Room authority. The shared
-// player name and last-Room code support both transports.
+// Player name is a browser preference. The Room-scoped Membership and its
+// discoverable last-Room pointer are persisted separately by the transport.
 
-const PLAYER_ID_KEY = 'wikispeedrun.playerId';
 const PLAYER_NAME_KEY = 'wikispeedrun.playerName';
 const LAST_ROOM_KEY = 'wikispeedrun.lastRoom';
-
-export function getPlayerId(): string {
-  let id = localStorage.getItem(PLAYER_ID_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(PLAYER_ID_KEY, id);
-  }
-  return id;
-}
 
 export function getPlayerName(): string {
   return localStorage.getItem(PLAYER_NAME_KEY) ?? '';

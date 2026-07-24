@@ -4,8 +4,6 @@
   // every entry point in this pnpm workspace, so declaring them explicitly only
   // produces "redundant entry pattern" hints:
   //   - client: vite plugin follows client/index.html -> src/main.tsx
-  //   - server: the start/dev scripts (tsx src/index.ts) mark src/index.ts;
-  //             the vitest plugin marks src/**/*.test.ts as entries
   //   - shared: package "main"/"types" -> src/index.ts
   // prototype/ is not a workspace member (see pnpm-workspace.yaml), so knip never
   // scans it — no ignore needed; write-only spike territory per ARCHITECTURE.md.

@@ -28,8 +28,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       subscribe({
-        onMessage: (message) =>
-          dispatch({ type: 'server/message', message, receivedAt: Date.now() }),
+        onMessage: (message) => dispatch({ type: 'room/message', message, receivedAt: Date.now() }),
         onConnect: () => dispatch({ type: 'socket/connected' }),
         onDisconnect: (disconnect) => dispatch({ type: 'socket/disconnected', disconnect }),
       }),
