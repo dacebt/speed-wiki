@@ -6,12 +6,18 @@ import type {
 } from '@wikispeedrun/shared';
 import { env } from 'cloudflare:workers';
 import { evictDurableObject, reset, runInDurableObject, SELF } from 'cloudflare:test';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { expireMembershipGrace } from './roomPresence.js';
+import { MEMBERSHIP_GRACE_MS, type MembershipGraceDeadline } from './roomSchedule.js';
 import { ROOM_STORAGE_KEY, parseRoomSnapshot } from './snapshot.js';
 
 const JOIN_ATTEMPT_ID = '9e2a5f17-b57f-4ee9-9a7d-b4ae8f2dd1b2';
+const SECOND_JOIN_ATTEMPT_ID = '2297ac68-da58-4cad-94ae-e5f863beab60';
 
-afterEach(() => reset());
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await reset();
+});
 
 describe('Cloudflare Room creation boundary', () => {
   test('persists a single server-issued host membership before returning', async () => {
@@ -25,11 +31,129 @@ describe('Cloudflare Room creation boundary', () => {
     expect(snapshot.room.code).toBe(created.roomCode);
     expect(snapshot.room.phase).toBe('lobby');
     expect(snapshot.room.players).toEqual([
-      expect.objectContaining({ id: created.playerId, name: 'Ada', isHost: true }),
+      expect.objectContaining({ id: created.playerId, name: 'Ada', isHost: true, away: true }),
     ]);
-    expect(snapshot.memberships[created.playerId]?.credentialDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(snapshot.memberships[created.playerId]).toEqual({
+      credentialDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+      activeConnectionId: null,
+    });
+    expect(snapshot.deadlines).toEqual([
+      {
+        kind: 'membership-grace',
+        playerId: created.playerId,
+        connectionId: null,
+        at: expect.any(Number),
+      },
+    ]);
     expect(JSON.stringify(stored)).not.toContain(created.rejoinCredential);
   });
+
+  test('expires an abandoned creation, returns 404, and permits the exact code to be claimed again', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const created = await createRoom('Cancelled Host');
+    const stub = env.ROOMS.getByName(created.roomCode);
+    const before = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(before.deadlines[0]?.at).toBe(1_000 + MEMBERSHIP_GRACE_MS);
+
+    clock.mockReturnValue(1_000 + MEMBERSHIP_GRACE_MS);
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+    expect(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    ).toBeUndefined();
+    expect(
+      await runInDurableObject(stub, async (_instance, state) => state.storage.getAlarm()),
+    ).toBeNull();
+    const absent = await SELF.fetch(
+      `https://example.test/api/rooms/${created.roomCode}/websocket`,
+      { headers: { Upgrade: 'websocket' } },
+    );
+    expect(absent.status).toBe(404);
+    const absentMembership = await SELF.fetch(
+      `https://example.test/api/rooms/${created.roomCode}/memberships`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playerName: 'Guest',
+          attemptId: JOIN_ATTEMPT_ID,
+          generation: 0,
+        }),
+      },
+    );
+    expect(absentMembership.status).toBe(404);
+
+    const reclaimed = await stub.createRoom(created.roomCode, 'Next Host');
+    expect(reclaimed).toEqual(expect.objectContaining({ ok: true, roomCode: created.roomCode }));
+  });
+
+  test.each([
+    ['one millisecond before', -1, true],
+    ['exactly at', 0, false],
+    ['one millisecond after', 1, false],
+  ])(
+    'initial host authentication %s the grace cutoff is accepted=%s',
+    async (_label, offset, accepted) => {
+      const base = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+      const host = await createRoom('Host');
+      const stub = env.ROOMS.getByName(host.roomCode);
+      const before = parseRoomSnapshot(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      );
+      const grace = before.deadlines[0]!;
+      if (!accepted) {
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.setAlarm(grace.at + MEMBERSHIP_GRACE_MS),
+        );
+      }
+      clock.mockReturnValue(grace.at + offset);
+
+      if (accepted) {
+        const socket = await connectRoomSocket(host);
+        const restored = parseRoomSnapshot(
+          await runInDurableObject(stub, async (_instance, state) =>
+            state.storage.get(ROOM_STORAGE_KEY),
+          ),
+        );
+        expect(restored.room.players[0]).toEqual(
+          expect.objectContaining({ id: host.playerId, away: false }),
+        );
+        expect(restored.deadlines).toEqual([]);
+        socket.close(1000, 'Test complete.');
+        return;
+      }
+
+      const socket = await openRoomSocket(host.roomCode);
+      const error = waitForMessage(socket);
+      const closed = waitForClose(socket);
+      socket.send(connectFrame(host));
+      await expect(error).resolves.toEqual(
+        expect.objectContaining({ type: 'room/error', code: 'invalid-membership' }),
+      );
+      expect((await closed).code).toBe(4003);
+      const rejected = parseRoomSnapshot(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      );
+      expect(rejected).toEqual(before);
+
+      await runInDurableObject(stub, async (instance) => instance.alarm());
+      expect(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      ).toBeUndefined();
+    },
+  );
 
   test('rejects an invalid Membership credential', async () => {
     const created = await createRoom('Grace');
@@ -155,6 +279,7 @@ describe('Cloudflare Room creation boundary', () => {
 
   test('same join attempt survives response loss and eviction without a visible duplicate', async () => {
     const host = await createRoom('Host');
+    const hostSocket = await connectRoomSocket(host);
     const path = `https://example.test/api/rooms/${host.roomCode}/memberships`;
     const firstBody = JSON.stringify({
       playerName: 'Guest',
@@ -242,10 +367,12 @@ describe('Cloudflare Room creation boundary', () => {
       afterReplay.room.players.filter((player) => player.id === retried.playerId),
     ).toHaveLength(1);
     guestSocket.close(1000, 'Test complete.');
+    hostSocket.close(1000, 'Test complete.');
   });
 
   test('a higher join generation wins before a late lower generation arrives', async () => {
     const host = await createRoom('Host');
+    const hostSocket = await connectRoomSocket(host);
     const path = `https://example.test/api/rooms/${host.roomCode}/memberships`;
     const newerResponse = await SELF.fetch(path, {
       method: 'POST',
@@ -290,10 +417,12 @@ describe('Cloudflare Room creation boundary', () => {
     );
     expect(promoted.room.players.filter((player) => player.id === newer.playerId)).toHaveLength(1);
     socket.close(1000, 'Test complete.');
+    hostSocket.close(1000, 'Test complete.');
   });
 
   test('promotion survives the joining socket disappearing before its first sync is observed', async () => {
     const host = await createRoom('Host');
+    const hostSocket = await connectRoomSocket(host);
     const guest = await joinRoom(host.roomCode, 'Guest');
     const dropped = await openRoomSocket(host.roomCode);
     dropped.send(connectFrame(guest));
@@ -313,6 +442,7 @@ describe('Cloudflare Room creation boundary', () => {
 
     const recovered = await connectRoomSocket(guest);
     recovered.close(1000, 'Test complete.');
+    hostSocket.close(1000, 'Test complete.');
   });
 
   test('enforces the exact join boundary and reports an absent Room', async () => {
@@ -442,7 +572,89 @@ describe('Cloudflare Room creation boundary', () => {
     await expect(replacementSync).resolves.toEqual(
       expect.objectContaining({ type: 'room/sync', you: host.playerId }),
     );
+    await expect
+      .poll(async () => {
+        const stored = await runInDurableObject(
+          env.ROOMS.getByName(host.roomCode),
+          async (_instance, state) => state.storage.get(ROOM_STORAGE_KEY),
+        );
+        const snapshot = parseRoomSnapshot(stored);
+        return {
+          away: snapshot.room.players[0]?.away,
+          active: snapshot.memberships[host.playerId]?.activeConnectionId,
+          grace: snapshot.deadlines.filter((deadline) => deadline.kind === 'membership-grace')
+            .length,
+        };
+      })
+      .toEqual({ away: false, active: expect.any(String), grace: 0 });
     replacement.close(1000, 'Test complete.');
+  });
+
+  test('every queued mutation from a displaced Connection is transactionally rejected', async () => {
+    const host = await createRoom('Host');
+    const first = await connectRoomSocket(host);
+    const guest = await joinRoom(host.roomCode, 'Guest');
+    const hostJoined = waitForMessage(first);
+    const guestSocket = await connectRoomSocket(guest);
+    await hostJoined;
+    const stub = env.ROOMS.getByName(host.roomCode);
+    const beforeReplacement = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    const staleConnectionId = beforeReplacement.memberships[host.playerId]!.activeConnectionId!;
+
+    const replacement = await openRoomSocket(host.roomCode);
+    const oldError = waitForMessage(first);
+    const replacementSync = waitForMessage(replacement);
+    replacement.send(connectFrame(host));
+    await Promise.all([oldError, replacementSync]);
+    const baseline = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+
+    const queuedSocket = await openRoomSocket(host.roomCode);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const pending = state
+        .getWebSockets()
+        .find(
+          (socket) =>
+            (socket.deserializeAttachment() as { state?: string } | null)?.state === 'pending',
+        );
+      if (!pending) throw new Error('Expected queued stale socket.');
+      pending.serializeAttachment({
+        state: 'authenticated',
+        playerId: host.playerId,
+        connectionId: staleConnectionId,
+      });
+    });
+    const staleActions = [
+      { type: 'game/start' },
+      { type: 'race/hop', article: 'Stale' },
+      { type: 'race/giveUp' },
+      { type: 'game/playAgain' },
+      { type: 'room/kick', playerId: guest.playerId },
+    ];
+    for (const action of staleActions) {
+      const error = waitForMessage(queuedSocket);
+      queuedSocket.send(JSON.stringify(action));
+      await expect(error).resolves.toEqual(
+        expect.objectContaining({ type: 'room/error', code: 'connection-replaced' }),
+      );
+    }
+    expect(
+      parseRoomSnapshot(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      ),
+    ).toEqual(baseline);
+    queuedSocket.close(1000, 'Test complete.');
+    replacement.close(1000, 'Test complete.');
+    guestSocket.close(1000, 'Test complete.');
   });
 
   test('reclaims the same Membership after Durable Object eviction', async () => {
@@ -463,6 +675,444 @@ describe('Cloudflare Room creation boundary', () => {
     expect(sync).toEqual(expect.objectContaining({ type: 'room/sync', you: host.playerId }));
     replacement.close(1000, 'Test complete.');
   });
+
+  test('a reconnect inside grace keeps identity and cancels eviction', async () => {
+    const host = await createRoom('Host');
+    const first = await connectRoomSocket(host);
+    first.close(1000, 'Temporary disconnect.');
+    const stub = env.ROOMS.getByName(host.roomCode);
+    await expect
+      .poll(async () => {
+        const stored = await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        );
+        return parseRoomSnapshot(stored).room.players[0]?.away;
+      })
+      .toBe(true);
+    const away = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(away.deadlines).toEqual([
+      expect.objectContaining({ kind: 'membership-grace', playerId: host.playerId }),
+    ]);
+
+    const replacement = await connectRoomSocket(host);
+    const restored = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(restored.room.players).toEqual([
+      expect.objectContaining({ id: host.playerId, away: false, isHost: true }),
+    ]);
+    expect(restored.deadlines).toEqual([]);
+    replacement.close(1000, 'Test complete.');
+  });
+
+  test('stale and duplicate grace work are idempotent no-ops', async () => {
+    const base = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    const host = await createRoom('Host');
+    const hostSocket = await connectRoomSocket(host);
+    const guest = await joinRoom(host.roomCode, 'Guest');
+    const hostJoined = waitForMessage(hostSocket);
+    const guestSocket = await connectRoomSocket(guest);
+    await hostJoined;
+    const stub = env.ROOMS.getByName(host.roomCode);
+
+    clock.mockReturnValue(base + 1_000);
+    guestSocket.close(1000, 'Temporary disconnect.');
+    await expect
+      .poll(async () => {
+        const stored = await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        );
+        return parseRoomSnapshot(stored).room.players.find((player) => player.id === guest.playerId)
+          ?.away;
+      })
+      .toBe(true);
+    const firstAway = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    const staleGrace = firstAway.deadlines.find(
+      (deadline): deadline is MembershipGraceDeadline =>
+        deadline.kind === 'membership-grace' && deadline.playerId === guest.playerId,
+    )!;
+    clock.mockReturnValue(staleGrace.at - 1);
+    const replacement = await connectRoomSocket(guest);
+    const reconnected = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(
+      await runInDurableObject(stub, async (_instance, state) =>
+        expireMembershipGrace(state, staleGrace),
+      ),
+    ).toEqual({ kind: 'none' });
+    expect(
+      parseRoomSnapshot(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      ),
+    ).toEqual(reconnected);
+
+    clock.mockReturnValue(staleGrace.at + 1_000);
+    replacement.close(1000, 'Disconnect again.');
+    await expect
+      .poll(async () => {
+        const stored = await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        );
+        return parseRoomSnapshot(stored).deadlines.some(
+          (deadline) =>
+            deadline.kind === 'membership-grace' &&
+            deadline.playerId === guest.playerId &&
+            deadline.at > staleGrace.at,
+        );
+      })
+      .toBe(true);
+    const secondAway = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    const due = secondAway.deadlines.find(
+      (deadline): deadline is MembershipGraceDeadline =>
+        deadline.kind === 'membership-grace' && deadline.playerId === guest.playerId,
+    )!;
+    clock.mockReturnValue(due.at);
+    expect(
+      await runInDurableObject(stub, async (_instance, state) => expireMembershipGrace(state, due)),
+    ).toEqual(expect.objectContaining({ kind: 'sync' }));
+    const expired = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(
+      await runInDurableObject(stub, async (_instance, state) => expireMembershipGrace(state, due)),
+    ).toEqual({ kind: 'none' });
+    expect(
+      parseRoomSnapshot(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      ),
+    ).toEqual(expired);
+    hostSocket.close(1000, 'Test complete.');
+  });
+
+  test('hibernated WebSocket error and repeated close callbacks disconnect only once', async () => {
+    const host = await createRoom('Host');
+    const socket = await connectRoomSocket(host);
+    const stub = env.ROOMS.getByName(host.roomCode);
+    await evictDurableObject(stub);
+
+    const observed = await runInDurableObject(stub, async (instance, state) => {
+      const server = state.getWebSockets()[0]!;
+      await instance.webSocketError(server);
+      const once = parseRoomSnapshot(await state.storage.get(ROOM_STORAGE_KEY));
+      await instance.webSocketClose(server);
+      await instance.webSocketClose(server);
+      const repeated = parseRoomSnapshot(await state.storage.get(ROOM_STORAGE_KEY));
+      return { once, repeated };
+    });
+    expect(observed.once.deadlines).toEqual([
+      expect.objectContaining({ kind: 'membership-grace', playerId: host.playerId }),
+    ]);
+    expect(observed.repeated).toEqual(observed.once);
+    socket.close(1000, 'Test complete.');
+  });
+
+  test.each([
+    ['one millisecond before', -1, true],
+    ['exactly at', 0, false],
+    ['one millisecond after', 1, false],
+  ])(
+    'disconnected Player authentication %s the grace cutoff is accepted=%s',
+    async (_label, offset, accepted) => {
+      const base = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+      const host = await createRoom('Host');
+      clock.mockReturnValue(base + 1);
+      const first = await connectRoomSocket(host);
+      clock.mockReturnValue(base + 1_000);
+      first.close(1000, 'Temporary disconnect.');
+      const stub = env.ROOMS.getByName(host.roomCode);
+      await expect
+        .poll(async () => {
+          const stored = await runInDurableObject(stub, async (_instance, state) =>
+            state.storage.get(ROOM_STORAGE_KEY),
+          );
+          return parseRoomSnapshot(stored).room.players[0]?.away;
+        })
+        .toBe(true);
+      const before = parseRoomSnapshot(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      );
+      const grace = before.deadlines.find(
+        (deadline) => deadline.kind === 'membership-grace' && deadline.playerId === host.playerId,
+      )!;
+      if (!accepted) {
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.setAlarm(grace.at + MEMBERSHIP_GRACE_MS),
+        );
+      }
+      clock.mockReturnValue(grace.at + offset);
+
+      if (accepted) {
+        const replacement = await connectRoomSocket(host);
+        const restored = parseRoomSnapshot(
+          await runInDurableObject(stub, async (_instance, state) =>
+            state.storage.get(ROOM_STORAGE_KEY),
+          ),
+        );
+        expect(restored.room.players[0]).toEqual(
+          expect.objectContaining({ id: host.playerId, away: false }),
+        );
+        expect(restored.deadlines).toEqual([]);
+        replacement.close(1000, 'Test complete.');
+        return;
+      }
+
+      const rejectedSocket = await openRoomSocket(host.roomCode);
+      const error = waitForMessage(rejectedSocket);
+      rejectedSocket.send(connectFrame(host));
+      await expect(error).resolves.toEqual(
+        expect.objectContaining({ type: 'room/error', code: 'invalid-membership' }),
+      );
+      const rejected = parseRoomSnapshot(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      );
+      expect(rejected).toEqual(before);
+
+      await runInDurableObject(stub, async (instance) => instance.alarm());
+      expect(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      ).toBeUndefined();
+    },
+  );
+
+  test('grace expiry removes an away host and transfers authority', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const host = await createRoom('Host');
+    const hostSocket = await connectRoomSocket(host);
+    const guest = await joinRoom(host.roomCode, 'Guest');
+    const hostJoined = waitForMessage(hostSocket);
+    const guestSocket = await connectRoomSocket(guest);
+    await hostJoined;
+
+    const guestSawAway = waitForMessage(guestSocket);
+    hostSocket.close(1000, 'Host disconnected.');
+    await expect(guestSawAway).resolves.toEqual(
+      expect.objectContaining({
+        type: 'room/sync',
+        room: expect.objectContaining({
+          players: expect.arrayContaining([
+            expect.objectContaining({ id: host.playerId, away: true }),
+          ]),
+        }),
+      }),
+    );
+    const stub = env.ROOMS.getByName(host.roomCode);
+    const away = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    const grace = away.deadlines.find(
+      (deadline) => deadline.kind === 'membership-grace' && deadline.playerId === host.playerId,
+    );
+    expect(grace).toBeDefined();
+
+    clock.mockReturnValue(grace!.at);
+    const transferred = waitForMessage(guestSocket);
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+    await expect(transferred).resolves.toEqual(
+      expect.objectContaining({
+        type: 'room/sync',
+        room: expect.objectContaining({
+          players: [expect.objectContaining({ id: guest.playerId, isHost: true, away: false })],
+        }),
+      }),
+    );
+    const persisted = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(persisted.memberships[host.playerId]).toBeUndefined();
+    expect(persisted.memberships[guest.playerId]).toBeDefined();
+    guestSocket.close(1000, 'Test complete.');
+  });
+
+  test('the transferred host can kick another Membership', async () => {
+    const base = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    const host = await createRoom('Host');
+    const hostSocket = await connectRoomSocket(host);
+    const successor = await joinRoom(host.roomCode, 'Successor');
+    const hostSawSuccessor = waitForMessage(hostSocket);
+    const successorSocket = await connectRoomSocket(successor);
+    await hostSawSuccessor;
+    const target = await joinRoom(host.roomCode, 'Target', SECOND_JOIN_ATTEMPT_ID);
+    const hostSawTarget = waitForMessage(hostSocket);
+    const successorSawTarget = waitForMessage(successorSocket);
+    const targetSocket = await connectRoomSocket(target);
+    await Promise.all([hostSawTarget, successorSawTarget]);
+
+    clock.mockReturnValue(base + 1_000);
+    const successorSawAway = waitForMessage(successorSocket);
+    const targetSawAway = waitForMessage(targetSocket);
+    hostSocket.close(1000, 'Host disconnected.');
+    await Promise.all([successorSawAway, targetSawAway]);
+    const stub = env.ROOMS.getByName(host.roomCode);
+    const away = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    const grace = away.deadlines.find(
+      (deadline) => deadline.kind === 'membership-grace' && deadline.playerId === host.playerId,
+    )!;
+    clock.mockReturnValue(grace.at);
+    const successorTransferred = waitForMessage(successorSocket);
+    const targetTransferred = waitForMessage(targetSocket);
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+    await Promise.all([successorTransferred, targetTransferred]);
+
+    const kicked = waitForMessage(targetSocket);
+    const successorSync = waitForMessage(successorSocket);
+    successorSocket.send(JSON.stringify({ type: 'room/kick', playerId: target.playerId }));
+    await expect(kicked).resolves.toEqual(
+      expect.objectContaining({ type: 'room/error', code: 'kicked' }),
+    );
+    await expect(successorSync).resolves.toEqual(
+      expect.objectContaining({
+        type: 'room/sync',
+        room: expect.objectContaining({
+          players: [expect.objectContaining({ id: successor.playerId, isHost: true })],
+        }),
+      }),
+    );
+    successorSocket.close(1000, 'Test complete.');
+  });
+
+  test('the host can kick an active Membership atomically', async () => {
+    const host = await createRoom('Host');
+    const hostSocket = await connectRoomSocket(host);
+    const guest = await joinRoom(host.roomCode, 'Guest');
+    const hostJoined = waitForMessage(hostSocket);
+    const guestSocket = await connectRoomSocket(guest);
+    await hostJoined;
+
+    const guestError = waitForMessage(guestSocket);
+    const guestClose = waitForClose(guestSocket);
+    const hostSync = waitForMessage(hostSocket);
+    hostSocket.send(JSON.stringify({ type: 'room/kick', playerId: guest.playerId }));
+    await expect(guestError).resolves.toEqual({
+      type: 'room/error',
+      code: 'kicked',
+      message: 'The host removed you from the Room.',
+    });
+    expect((await guestClose).code).toBe(4003);
+    await expect(hostSync).resolves.toEqual(
+      expect.objectContaining({
+        type: 'room/sync',
+        room: expect.objectContaining({
+          players: [expect.objectContaining({ id: host.playerId })],
+        }),
+      }),
+    );
+    const snapshot = parseRoomSnapshot(
+      await runInDurableObject(env.ROOMS.getByName(host.roomCode), async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(snapshot.memberships[guest.playerId]).toBeUndefined();
+    expect(
+      Object.values(snapshot.joinAttempts).some((attempt) => attempt.playerId === guest.playerId),
+    ).toBe(false);
+    expect(snapshot.deadlines).toEqual([]);
+
+    const stale = await openRoomSocket(host.roomCode);
+    const staleError = waitForMessage(stale);
+    stale.send(connectFrame(guest));
+    await expect(staleError).resolves.toEqual(
+      expect.objectContaining({ type: 'room/error', code: 'invalid-membership' }),
+    );
+    hostSocket.close(1000, 'Test complete.');
+  });
+
+  test('a non-host kick is rejected without mutating Room state', async () => {
+    const host = await createRoom('Host');
+    const hostSocket = await connectRoomSocket(host);
+    const guest = await joinRoom(host.roomCode, 'Guest');
+    const hostJoined = waitForMessage(hostSocket);
+    const guestSocket = await connectRoomSocket(guest);
+    await hostJoined;
+    const stub = env.ROOMS.getByName(host.roomCode);
+    const before = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+
+    const error = waitForMessage(guestSocket);
+    guestSocket.send(JSON.stringify({ type: 'room/kick', playerId: host.playerId }));
+    await expect(error).resolves.toEqual(
+      expect.objectContaining({ type: 'room/error', code: 'not-host' }),
+    );
+    expect(
+      parseRoomSnapshot(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      ),
+    ).toEqual(before);
+    guestSocket.close(1000, 'Test complete.');
+    hostSocket.close(1000, 'Test complete.');
+  });
+
+  test('the host can kick an away Membership and cancel its grace deadline', async () => {
+    const host = await createRoom('Host');
+    const hostSocket = await connectRoomSocket(host);
+    const guest = await joinRoom(host.roomCode, 'Guest');
+    const hostJoined = waitForMessage(hostSocket);
+    const guestSocket = await connectRoomSocket(guest);
+    await hostJoined;
+
+    const guestAway = waitForMessage(hostSocket);
+    guestSocket.close(1000, 'Guest disconnected.');
+    await guestAway;
+    const hostSync = waitForMessage(hostSocket);
+    hostSocket.send(JSON.stringify({ type: 'room/kick', playerId: guest.playerId }));
+    await hostSync;
+    const persisted = await runInDurableObject(
+      env.ROOMS.getByName(host.roomCode),
+      async (_instance, state) => ({
+        snapshot: parseRoomSnapshot(await state.storage.get(ROOM_STORAGE_KEY)),
+        alarm: await state.storage.getAlarm(),
+      }),
+    );
+    expect(persisted.snapshot.room.players.map((player) => player.id)).toEqual([host.playerId]);
+    expect(persisted.snapshot.memberships[guest.playerId]).toBeUndefined();
+    expect(persisted.snapshot.deadlines).toEqual([]);
+    expect(persisted.alarm).toBeNull();
+    hostSocket.close(1000, 'Test complete.');
+  });
 });
 
 async function createRoom(playerName: string): Promise<CreateRoomResponse> {
@@ -475,11 +1125,15 @@ async function createRoom(playerName: string): Promise<CreateRoomResponse> {
   return response.json<CreateRoomResponse>();
 }
 
-async function joinRoom(roomCode: string, playerName: string): Promise<JoinRoomResponse> {
+async function joinRoom(
+  roomCode: string,
+  playerName: string,
+  attemptId = JOIN_ATTEMPT_ID,
+): Promise<JoinRoomResponse> {
   const response = await SELF.fetch(`https://example.test/api/rooms/${roomCode}/memberships`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ playerName, attemptId: JOIN_ATTEMPT_ID, generation: 0 }),
+    body: JSON.stringify({ playerName, attemptId, generation: 0 }),
   });
   expect(response.status).toBe(201);
   return response.json<JoinRoomResponse>();

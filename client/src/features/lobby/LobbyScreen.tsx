@@ -12,6 +12,7 @@ import { Avatar } from '../../components/Avatar';
 import {
   sendIntent,
   supportsInvitedJoining,
+  supportsKick,
   supportsLobbyActions,
   supportsRoundStart,
 } from '../../lib/transport';
@@ -75,7 +76,7 @@ export function LobbyScreen() {
               player={p}
               isYou={p.id === you}
               showScore={hasScores}
-              canKick={supportsLobbyActions && isHost && p.id !== you}
+              canKick={supportsKick && isHost && p.id !== you}
             />
           ))}
         </ul>

@@ -13,6 +13,7 @@ export const supportsInvitedJoining = true;
 export const supportsLobbyActions = true;
 export const supportsRoundStart = true;
 export const supportsRaceActions = true;
+export const supportsKick = true;
 
 export function claimStoredInvite(_roomCode: string): InviteClaim {
   return 'join';

@@ -1,4 +1,5 @@
 import type { CorePlayer, CoreRoom } from '@wikispeedrun/game';
+import { phaseDeadline, type MembershipGraceDeadline, type RoomDeadline } from './roomSchedule.js';
 import {
   CATEGORIES,
   DIFFICULTIES,
@@ -13,11 +14,12 @@ import {
   type RoundView,
 } from '@wikispeedrun/shared';
 
-export const ROOM_SNAPSHOT_VERSION = 4;
+export const ROOM_SNAPSHOT_VERSION = 5;
 export const ROOM_STORAGE_KEY = 'room';
 
 interface Membership {
   credentialDigest: string;
+  activeConnectionId: string | null;
 }
 
 type JoinAttempt =
@@ -45,18 +47,13 @@ interface RoundPreparation {
   pair: PreparedArticlePair | null;
 }
 
-type RoomDeadline =
-  | { kind: 'round-preparation'; token: string; at: number }
-  | { kind: 'countdown'; token: string; at: number }
-  | { kind: 'round-timeout'; token: string; at: number };
-
 export interface RoomSnapshot {
   schemaVersion: typeof ROOM_SNAPSHOT_VERSION;
   room: CoreRoom;
   memberships: Record<string, Membership>;
   joinAttempts: Record<string, JoinAttempt>;
   roundPreparation: RoundPreparation | null;
-  deadline: RoomDeadline | null;
+  deadlines: RoomDeadline[];
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -260,13 +257,19 @@ function parseMemberships(value: unknown): Record<string, Membership> | null {
     if (
       !isUuid(playerId) ||
       !isRecord(membership) ||
-      !hasExactKeys(membership, ['credentialDigest']) ||
+      !hasExactKeys(membership, ['credentialDigest', 'activeConnectionId']) ||
       typeof membership.credentialDigest !== 'string' ||
-      !/^[a-f0-9]{64}$/.test(membership.credentialDigest)
+      !/^[a-f0-9]{64}$/.test(membership.credentialDigest) ||
+      (membership.activeConnectionId !== null &&
+        (typeof membership.activeConnectionId !== 'string' ||
+          !isUuid(membership.activeConnectionId)))
     ) {
       return null;
     }
-    memberships[playerId] = { credentialDigest: membership.credentialDigest };
+    memberships[playerId] = {
+      credentialDigest: membership.credentialDigest,
+      activeConnectionId: membership.activeConnectionId,
+    };
   }
   return memberships;
 }
@@ -360,25 +363,56 @@ function parseRoundPreparation(value: unknown): RoundPreparation | null | undefi
   };
 }
 
-function parseDeadline(value: unknown): RoomDeadline | null | undefined {
-  if (value === null) return null;
+function parseDeadline(value: unknown): RoomDeadline | null {
+  if (!isRecord(value) || !isPositiveInteger(value.at)) {
+    return null;
+  }
+  if (value.kind === 'membership-grace') {
+    return hasExactKeys(value, ['kind', 'playerId', 'connectionId', 'at']) &&
+      typeof value.playerId === 'string' &&
+      isUuid(value.playerId) &&
+      (value.connectionId === null ||
+        (typeof value.connectionId === 'string' && isUuid(value.connectionId)))
+      ? {
+          kind: 'membership-grace',
+          playerId: value.playerId,
+          connectionId: value.connectionId,
+          at: value.at,
+        }
+      : null;
+  }
   if (
-    !isRecord(value) ||
     !hasExactKeys(value, ['kind', 'token', 'at']) ||
     (value.kind !== 'round-preparation' &&
       value.kind !== 'countdown' &&
       value.kind !== 'round-timeout') ||
-    typeof value.token !== 'string' ||
-    !isPositiveInteger(value.at)
+    typeof value.token !== 'string'
   ) {
-    return undefined;
+    return null;
   }
   if (value.kind === 'round-timeout') {
-    if (!/^round:[1-9]\d*:(?:0|[1-9]\d*)$/.test(value.token)) return undefined;
+    if (!/^round:[1-9]\d*:(?:0|[1-9]\d*)$/.test(value.token)) return null;
   } else if (!isUuid(value.token)) {
-    return undefined;
+    return null;
   }
   return { kind: value.kind, token: value.token, at: value.at };
+}
+
+function parseDeadlines(value: unknown): RoomDeadline[] | null {
+  if (!Array.isArray(value)) return null;
+  const deadlines = value.map(parseDeadline);
+  if (deadlines.some((deadline) => deadline === null)) return null;
+  const parsed = deadlines as RoomDeadline[];
+  if (parsed.filter((deadline) => deadline.kind !== 'membership-grace').length > 1) return null;
+  const grace = parsed.filter(
+    (deadline): deadline is MembershipGraceDeadline => deadline.kind === 'membership-grace',
+  );
+  if (new Set(grace.map((deadline) => deadline.playerId)).size !== grace.length) return null;
+  const connectionIds = grace
+    .map((deadline) => deadline.connectionId)
+    .filter((connectionId): connectionId is string => connectionId !== null);
+  if (new Set(connectionIds).size !== connectionIds.length) return null;
+  return parsed;
 }
 
 function isCoherentRoom(room: CoreRoom): boolean {
@@ -445,7 +479,7 @@ export function parseRoomSnapshot(value: unknown): RoomSnapshot {
       'memberships',
       'joinAttempts',
       'roundPreparation',
-      'deadline',
+      'deadlines',
     ]) ||
     value.schemaVersion !== ROOM_SNAPSHOT_VERSION
   ) {
@@ -455,12 +489,12 @@ export function parseRoomSnapshot(value: unknown): RoomSnapshot {
   const memberships = parseMemberships(value.memberships);
   const joinAttempts = parseJoinAttempts(value.joinAttempts);
   const roundPreparation = parseRoundPreparation(value.roundPreparation);
-  const deadline = parseDeadline(value.deadline);
+  const deadlines = parseDeadlines(value.deadlines);
   if (!room) throw new Error('Invalid Room snapshot state.');
   if (!memberships) throw new Error('Invalid Room snapshot Memberships.');
   if (!joinAttempts) throw new Error('Invalid Room snapshot join attempts.');
   if (roundPreparation === undefined) throw new Error('Invalid Room snapshot Round preparation.');
-  if (deadline === undefined) throw new Error('Invalid Room snapshot Deadline.');
+  if (!deadlines) throw new Error('Invalid Room snapshot Deadlines.');
   if (
     room.players.length === 0 ||
     room.players.some((player) => memberships[player.id] === undefined) ||
@@ -482,7 +516,10 @@ export function parseRoomSnapshot(value: unknown): RoomSnapshot {
   if (new Set(attemptedPlayerIds).size !== attemptedPlayerIds.length) {
     throw new Error('Invalid join attempt Player identity aliases.');
   }
-  if (!isCoherentRuntimeState(room, roundPreparation, deadline)) {
+  if (!isCoherentMembershipState(room, memberships, deadlines)) {
+    throw new Error('Invalid Room snapshot Connection ownership.');
+  }
+  if (!isCoherentRuntimeState(room, roundPreparation, deadlines)) {
     throw new Error('Invalid Room snapshot pending runtime state.');
   }
   return {
@@ -491,15 +528,16 @@ export function parseRoomSnapshot(value: unknown): RoomSnapshot {
     memberships,
     joinAttempts,
     roundPreparation,
-    deadline,
+    deadlines,
   };
 }
 
 function isCoherentRuntimeState(
   room: CoreRoom,
   preparation: RoundPreparation | null,
-  deadline: RoomDeadline | null,
+  deadlines: readonly RoomDeadline[],
 ): boolean {
+  const deadline = phaseDeadline(deadlines);
   const matchesSettings =
     preparation?.difficulty === room.settings.difficulty &&
     preparation.category === room.settings.category;
@@ -532,6 +570,64 @@ function isCoherentRuntimeState(
     );
   }
   return preparation === null && deadline === null;
+}
+
+function isCoherentMembershipState(
+  room: CoreRoom,
+  memberships: Record<string, Membership>,
+  deadlines: readonly RoomDeadline[],
+): boolean {
+  const grace = deadlines.filter(
+    (deadline): deadline is MembershipGraceDeadline => deadline.kind === 'membership-grace',
+  );
+  const activeConnectionIds = Object.values(memberships)
+    .map((membership) => membership.activeConnectionId)
+    .filter((connectionId): connectionId is string => connectionId !== null);
+  const graceConnectionIds = grace
+    .map((deadline) => deadline.connectionId)
+    .filter((connectionId): connectionId is string => connectionId !== null);
+  const ownedConnectionIds = [...activeConnectionIds, ...graceConnectionIds];
+  if (new Set(ownedConnectionIds).size !== ownedConnectionIds.length) return false;
+  const initialGrace = grace.filter((deadline) => deadline.connectionId === null);
+  if (initialGrace.length > 1) return false;
+  if (initialGrace.length === 1) {
+    const player = room.players[0];
+    if (
+      room.players.length !== 1 ||
+      Object.keys(memberships).length !== 1 ||
+      grace.length !== 1 ||
+      !player ||
+      player.id !== initialGrace[0]!.playerId ||
+      !player.isHost ||
+      !player.away ||
+      room.phase !== 'lobby' ||
+      room.roundsPlayed !== 0 ||
+      room.ranksAssigned !== 0 ||
+      room.countdownEndsAt !== null ||
+      room.round !== null
+    ) {
+      return false;
+    }
+  }
+  if (
+    grace.some(
+      (deadline) =>
+        memberships[deadline.playerId]?.activeConnectionId !== null ||
+        !room.players.some((player) => player.id === deadline.playerId && player.away),
+    )
+  ) {
+    return false;
+  }
+
+  return room.players.every((player) => {
+    const membership = memberships[player.id];
+    const playerGrace = grace.filter((deadline) => deadline.playerId === player.id);
+    if (!membership) return false;
+    if (membership.activeConnectionId === null) {
+      return player.away && playerGrace.length === 1;
+    }
+    return !player.away && playerGrace.length === 0;
+  });
 }
 
 export function roundTimeoutToken(round: Pick<RoundView, 'roundNumber' | 'startedAt'>): string {

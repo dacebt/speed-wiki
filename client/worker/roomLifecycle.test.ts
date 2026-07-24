@@ -9,9 +9,11 @@ import {
 } from 'cloudflare:test';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { startRoundPreparation } from './roomLifecycle.js';
+import { phaseDeadline } from './roomSchedule.js';
 import { ROOM_STORAGE_KEY, parseRoomSnapshot } from './snapshot.js';
 
 const ATTEMPT_ID = '9e2a5f17-b57f-4ee9-9a7d-b4ae8f2dd1b2';
+const SECOND_ATTEMPT_ID = '2297ac68-da58-4cad-94ae-e5f863beab60';
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -37,13 +39,13 @@ describe('durable Round preparation and countdown', () => {
     expect(persisted.snapshot.roundPreparation).toEqual(
       expect.objectContaining({ pair: null, difficulty: 'curated', category: 'any' }),
     );
-    expect(persisted.snapshot.deadline).toEqual(
+    expect(phaseDeadline(persisted.snapshot.deadlines)).toEqual(
       expect.objectContaining({
         kind: 'round-preparation',
         token: persisted.snapshot.roundPreparation?.token,
       }),
     );
-    expect(persisted.alarm).toBe(persisted.snapshot.deadline?.at);
+    expect(persisted.alarm).toBe(phaseDeadline(persisted.snapshot.deadlines)?.at);
     socket.close(1000, 'Test complete.');
   });
 
@@ -62,7 +64,9 @@ describe('durable Round preparation and countdown', () => {
     await Promise.all([hostPreparing, guestPreparing]);
 
     const preparation = await storedRuntime(host.roomCode);
-    const now = vi.spyOn(Date, 'now').mockReturnValue(preparation.snapshot.deadline!.at);
+    const now = vi
+      .spyOn(Date, 'now')
+      .mockReturnValue(phaseDeadline(preparation.snapshot.deadlines)!.at);
     await evictDurableObject(stub);
     const hostCountdown = waitForPhase(hostSocket, 'countdown');
     const guestCountdown = waitForPhase(guestSocket, 'countdown');
@@ -70,7 +74,7 @@ describe('durable Round preparation and countdown', () => {
     await Promise.all([hostCountdown, guestCountdown]);
     const countdown = await storedRuntime(host.roomCode);
     expect(countdown.snapshot.roundPreparation?.pair).not.toBeNull();
-    expect(countdown.snapshot.deadline).toEqual(
+    expect(phaseDeadline(countdown.snapshot.deadlines)).toEqual(
       expect.objectContaining({
         kind: 'countdown',
         at: countdown.snapshot.room.countdownEndsAt,
@@ -78,7 +82,7 @@ describe('durable Round preparation and countdown', () => {
     );
     expect(countdown.alarm).toBe(countdown.snapshot.room.countdownEndsAt);
 
-    now.mockReturnValue(countdown.snapshot.deadline!.at);
+    now.mockReturnValue(phaseDeadline(countdown.snapshot.deadlines)!.at);
     await evictDurableObject(stub);
     const hostRacing = waitForPhase(hostSocket, 'racing');
     const guestRacing = waitForPhase(guestSocket, 'racing');
@@ -94,7 +98,7 @@ describe('durable Round preparation and countdown', () => {
     );
     const started = await storedRuntime(host.roomCode);
     expect(started.snapshot.roundPreparation).toBeNull();
-    expect(started.snapshot.deadline).toEqual({
+    expect(phaseDeadline(started.snapshot.deadlines)).toEqual({
       kind: 'round-timeout',
       token: `round:${started.snapshot.room.round?.roundNumber}:${started.snapshot.room.round?.startedAt}`,
       at: started.snapshot.room.round?.deadline,
@@ -113,33 +117,113 @@ describe('durable Round preparation and countdown', () => {
     await preparing;
 
     const pending = await storedRuntime(host.roomCode);
-    const now = vi.spyOn(Date, 'now').mockReturnValue(pending.snapshot.deadline!.at);
+    const now = vi
+      .spyOn(Date, 'now')
+      .mockReturnValue(phaseDeadline(pending.snapshot.deadlines)!.at);
     const countdownMessage = waitForPhase(socket, 'countdown');
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     await countdownMessage;
     const countdown = await storedRuntime(host.roomCode);
 
-    expect(countdown.snapshot.deadline?.kind).toBe('countdown');
-    expect(countdown.snapshot.deadline!.at).toBeGreaterThan(Date.now());
+    expect(phaseDeadline(countdown.snapshot.deadlines)?.kind).toBe('countdown');
+    expect(phaseDeadline(countdown.snapshot.deadlines)!.at).toBeGreaterThan(Date.now());
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     const rescheduled = await storedRuntime(host.roomCode);
     expect(rescheduled).toEqual(countdown);
 
-    now.mockReturnValue(countdown.snapshot.deadline!.at);
+    now.mockReturnValue(phaseDeadline(countdown.snapshot.deadlines)!.at);
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     expect((await storedRuntime(host.roomCode)).snapshot.room.phase).toBe('racing');
     socket.close(1000, 'Test complete.');
   });
 
+  test('one alarm deterministically drains tied grace deadlines before countdown', async () => {
+    const base = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    const host = await createRoom('Host');
+    const hostSocket = await connect(host);
+    const first = await joinRoom(host.roomCode, 'First');
+    const hostSawFirst = waitForMessage(hostSocket);
+    const firstSocket = await connect(first);
+    await hostSawFirst;
+    const second = await joinRoom(host.roomCode, 'Second', SECOND_ATTEMPT_ID);
+    const hostSawSecond = waitForMessage(hostSocket);
+    const firstSawSecond = waitForMessage(firstSocket);
+    const secondSocket = await connect(second);
+    await Promise.all([hostSawSecond, firstSawSecond]);
+    const stub = env.ROOMS.getByName(host.roomCode);
+
+    const preparingViews = [
+      waitForPhase(hostSocket, 'preparing'),
+      waitForPhase(firstSocket, 'preparing'),
+      waitForPhase(secondSocket, 'preparing'),
+    ];
+    hostSocket.send(JSON.stringify({ type: 'game/start' }));
+    await Promise.all(preparingViews);
+    const preparation = await storedRuntime(host.roomCode);
+    clock.mockReturnValue(phaseDeadline(preparation.snapshot.deadlines)!.at);
+    const countdownViews = [
+      waitForPhase(hostSocket, 'countdown'),
+      waitForPhase(firstSocket, 'countdown'),
+      waitForPhase(secondSocket, 'countdown'),
+    ];
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+    await Promise.all(countdownViews);
+    const countdown = await storedRuntime(host.roomCode);
+    const countdownAt = phaseDeadline(countdown.snapshot.deadlines)!.at;
+
+    clock.mockReturnValue(countdownAt - 45_000);
+    const hostSawAway = waitForMessages(hostSocket, 2);
+    firstSocket.close(1000, 'First disconnected.');
+    secondSocket.close(1000, 'Second disconnected.');
+    await hostSawAway;
+    const tied = await storedRuntime(host.roomCode);
+    expect(tied.snapshot.deadlines).toHaveLength(3);
+    expect(new Set(tied.snapshot.deadlines.map((deadline) => deadline.at))).toEqual(
+      new Set([countdownAt]),
+    );
+    const orderedPlayers = [first.playerId, second.playerId].sort();
+
+    clock.mockReturnValue(countdownAt);
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+    const afterFirst = await storedRuntime(host.roomCode);
+    expect(afterFirst.snapshot.room.players.map((player) => player.id)).not.toContain(
+      orderedPlayers[0],
+    );
+    expect(afterFirst.snapshot.room.players.map((player) => player.id)).toContain(
+      orderedPlayers[1],
+    );
+    expect(afterFirst.alarm).toBe(countdownAt);
+
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+    const afterSecond = await storedRuntime(host.roomCode);
+    expect(afterSecond.snapshot.room.players.map((player) => player.id)).toEqual([host.playerId]);
+    expect(afterSecond.snapshot.deadlines).toEqual([
+      expect.objectContaining({ kind: 'countdown', at: countdownAt }),
+    ]);
+    expect(afterSecond.alarm).toBe(countdownAt);
+
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+    const racing = await storedRuntime(host.roomCode);
+    expect(racing.snapshot.room.phase).toBe('racing');
+    expect(phaseDeadline(racing.snapshot.deadlines)?.kind).toBe('round-timeout');
+    hostSocket.close(1000, 'Test complete.');
+  });
+
   test('non-host Start is rejected without durable state or alarm mutation', async () => {
     const host = await createRoom('Host');
+    const hostSocket = await connect(host);
     const guest = await joinRoom(host.roomCode, 'Guest');
     const guestSocket = await connect(guest);
     const stub = env.ROOMS.getByName(host.roomCode);
     const before = await storedRuntime(host.roomCode);
 
     const result = await runInDurableObject(stub, async (_instance, state) =>
-      startRoundPreparation(state, guest.playerId),
+      startRoundPreparation(
+        state,
+        guest.playerId,
+        before.snapshot.memberships[guest.playerId]!.activeConnectionId!,
+      ),
     );
 
     expect(result).toEqual({
@@ -149,6 +233,7 @@ describe('durable Round preparation and countdown', () => {
     });
     expect(await storedRuntime(host.roomCode)).toEqual(before);
     guestSocket.close(1000, 'Test complete.');
+    hostSocket.close(1000, 'Test complete.');
   });
 
   test('random selection exhaustion returns everyone to the lobby honestly', async () => {
@@ -167,7 +252,7 @@ describe('durable Round preparation and countdown', () => {
     socket.send(JSON.stringify({ type: 'game/start' }));
     expect(syncRoom(await preparing).phase).toBe('preparing');
     const pending = await storedRuntime(host.roomCode);
-    vi.spyOn(Date, 'now').mockReturnValue(pending.snapshot.deadline!.at);
+    vi.spyOn(Date, 'now').mockReturnValue(phaseDeadline(pending.snapshot.deadlines)!.at);
     const failureMessages = waitForMessages(socket, 2);
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     const [error, lobby] = await failureMessages;
@@ -178,7 +263,7 @@ describe('durable Round preparation and countdown', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const persisted = await storedRuntime(host.roomCode);
     expect(persisted.snapshot.roundPreparation).toBeNull();
-    expect(persisted.snapshot.deadline).toBeNull();
+    expect(persisted.snapshot.deadlines).toEqual([]);
     expect(persisted.alarm).toBeNull();
     socket.close(1000, 'Test complete.');
   });
@@ -202,14 +287,14 @@ describe('durable Round preparation and countdown', () => {
     socket.send(JSON.stringify({ type: 'game/start' }));
     await preparing;
     const pending = await storedRuntime(host.roomCode);
-    vi.spyOn(Date, 'now').mockReturnValue(pending.snapshot.deadline!.at);
+    vi.spyOn(Date, 'now').mockReturnValue(phaseDeadline(pending.snapshot.deadlines)!.at);
     await runInDurableObject(stub, async (instance, state) => {
       const inFlight = instance.alarm();
       await Promise.resolve();
       const snapshot = parseRoomSnapshot(await state.storage.get(ROOM_STORAGE_KEY));
       snapshot.room.phase = 'lobby';
       snapshot.roundPreparation = null;
-      snapshot.deadline = null;
+      snapshot.deadlines = [];
       await state.storage.put(ROOM_STORAGE_KEY, snapshot);
       await state.storage.deleteAlarm();
       releaseFetch(
@@ -225,7 +310,7 @@ describe('durable Round preparation and countdown', () => {
     const persisted = await storedRuntime(host.roomCode);
     expect(persisted.snapshot.room.phase).toBe('lobby');
     expect(persisted.snapshot.roundPreparation).toBeNull();
-    expect(persisted.snapshot.deadline).toBeNull();
+    expect(persisted.snapshot.deadlines).toEqual([]);
     socket.close(1000, 'Test complete.');
   });
 });
@@ -240,11 +325,15 @@ async function createRoom(playerName: string): Promise<CreateRoomResponse> {
   return response.json<CreateRoomResponse>();
 }
 
-async function joinRoom(roomCode: string, playerName: string): Promise<JoinRoomResponse> {
+async function joinRoom(
+  roomCode: string,
+  playerName: string,
+  attemptId = ATTEMPT_ID,
+): Promise<JoinRoomResponse> {
   const response = await SELF.fetch(`https://example.test/api/rooms/${roomCode}/memberships`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ playerName, attemptId: ATTEMPT_ID, generation: 0 }),
+    body: JSON.stringify({ playerName, attemptId, generation: 0 }),
   });
   expect(response.status).toBe(201);
   return response.json<JoinRoomResponse>();

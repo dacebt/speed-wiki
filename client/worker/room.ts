@@ -12,6 +12,7 @@ import {
   type WorkerPlayerIntent,
 } from './roomConnection.js';
 import { processPlayerIntent } from './roomGameplay.js';
+import { disconnectMembership, kickMembership } from './roomPresence.js';
 import { ROOM_STORAGE_KEY, parseRoomSnapshot, type RoomSnapshot } from './snapshot.js';
 import { processRoomAlarm, startRoundPreparation } from './roomLifecycle.js';
 import {
@@ -72,9 +73,21 @@ export class RoomDurableObject extends DurableObject<Env> {
           message: 'This Room action is not available in the current migration slice.',
         });
       } else if (message.type === 'game/start') {
-        await this.startRoundPreparation(socket, attachment.playerId);
+        await this.startRoundPreparation(socket, attachment.playerId, attachment.connectionId);
+      } else if (message.type === 'room/kick') {
+        await this.kickMembership(
+          socket,
+          attachment.playerId,
+          attachment.connectionId,
+          message.playerId,
+        );
       } else {
-        await this.processPlayerIntent(socket, attachment.playerId, message);
+        await this.processPlayerIntent(
+          socket,
+          attachment.playerId,
+          attachment.connectionId,
+          message,
+        );
       }
       return;
     }
@@ -85,21 +98,29 @@ export class RoomDurableObject extends DurableObject<Env> {
       rejectSocket(socket, 'invalid-membership', 'The Room Membership is invalid.', 4003);
       return;
     }
+    const connectionId = crypto.randomUUID();
     const authentication = await authenticateMembership(
       this.ctx,
       connect.playerId,
       connect.rejoinCredential,
+      connectionId,
     );
     if (!authentication.ok) {
       rejectSocket(socket, 'invalid-membership', 'The Room Membership is invalid.', 4003);
       return;
     }
 
+    socket.serializeAttachment({
+      state: 'authenticated',
+      playerId: connect.playerId,
+      connectionId,
+    });
     for (const existing of this.ctx.getWebSockets()) {
       if (existing === socket) continue;
       const existingAttachment = parseAttachment(existing.deserializeAttachment());
       if (existingAttachment?.state !== 'authenticated') continue;
       if (existingAttachment.playerId !== connect.playerId) continue;
+      if (existingAttachment.connectionId !== authentication.previousConnectionId) continue;
       trySend(existing, {
         type: 'room/error',
         code: 'connection-replaced',
@@ -107,26 +128,33 @@ export class RoomDurableObject extends DurableObject<Env> {
       });
       closeSafely(existing, 4001, 'Connection replaced.');
     }
-    socket.serializeAttachment({
-      state: 'authenticated',
-      playerId: connect.playerId,
-    });
-    if (authentication.promoted) this.broadcastSync(authentication.snapshot);
-    sendSync(socket, authentication.snapshot, connect.playerId);
+    this.broadcastSync(authentication.snapshot);
   }
 
   override async alarm(): Promise<void> {
     const result = await processRoomAlarm(this.ctx);
     if (result.kind === 'error') {
-      this.broadcastError(result.code, result.message);
+      this.broadcastError(result.snapshot, result.code, result.message);
       this.broadcastSync(result.snapshot);
     } else if (result.kind === 'sync') {
       this.broadcastSync(result.snapshot);
     }
   }
 
-  private async startRoundPreparation(socket: WebSocket, playerId: string): Promise<void> {
-    const result = await startRoundPreparation(this.ctx, playerId);
+  override async webSocketClose(socket: WebSocket): Promise<void> {
+    await this.disconnect(socket);
+  }
+
+  override async webSocketError(socket: WebSocket): Promise<void> {
+    await this.disconnect(socket);
+  }
+
+  private async startRoundPreparation(
+    socket: WebSocket,
+    playerId: string,
+    connectionId: string,
+  ): Promise<void> {
+    const result = await startRoundPreparation(this.ctx, playerId, connectionId);
     if (result.kind === 'error') {
       send(socket, { type: 'room/error', code: result.code, message: result.message });
     } else {
@@ -137,9 +165,10 @@ export class RoomDurableObject extends DurableObject<Env> {
   private async processPlayerIntent(
     socket: WebSocket,
     playerId: string,
-    intent: Exclude<WorkerPlayerIntent, { type: 'game/start' }>,
+    connectionId: string,
+    intent: Exclude<WorkerPlayerIntent, { type: 'game/start' | 'room/kick' }>,
   ): Promise<void> {
-    const result = await processPlayerIntent(this.ctx, playerId, intent);
+    const result = await processPlayerIntent(this.ctx, playerId, connectionId, intent);
     if (result.kind === 'error') {
       send(socket, { type: 'room/error', code: result.code, message: result.message });
     } else if (result.kind === 'sync') {
@@ -147,18 +176,69 @@ export class RoomDurableObject extends DurableObject<Env> {
     }
   }
 
+  private async kickMembership(
+    socket: WebSocket,
+    actorId: string,
+    actorConnectionId: string,
+    targetId: string,
+  ): Promise<void> {
+    const result = await kickMembership(this.ctx, actorId, actorConnectionId, targetId);
+    if (result.kind === 'error') {
+      send(socket, { type: 'room/error', code: result.code, message: result.message });
+      return;
+    }
+    for (const target of this.ctx.getWebSockets()) {
+      const attachment = parseAttachment(target.deserializeAttachment());
+      if (
+        attachment?.state !== 'authenticated' ||
+        attachment.playerId !== targetId ||
+        attachment.connectionId !== result.connectionId
+      ) {
+        continue;
+      }
+      trySend(target, {
+        type: 'room/error',
+        code: 'kicked',
+        message: 'The host removed you from the Room.',
+      });
+      closeSafely(target, 4003, 'Removed by host.');
+    }
+    this.broadcastSync(result.snapshot);
+  }
+
+  private async disconnect(socket: WebSocket): Promise<void> {
+    const attachment = parseAttachment(socket.deserializeAttachment());
+    if (attachment?.state !== 'authenticated') return;
+    const result = await disconnectMembership(
+      this.ctx,
+      attachment.playerId,
+      attachment.connectionId,
+    );
+    if (result.kind === 'sync') this.broadcastSync(result.snapshot);
+  }
+
   private broadcastSync(snapshot: RoomSnapshot): void {
     for (const socket of this.ctx.getWebSockets()) {
       const attachment = parseAttachment(socket.deserializeAttachment());
       if (attachment?.state !== 'authenticated') continue;
+      if (
+        snapshot.memberships[attachment.playerId]?.activeConnectionId !== attachment.connectionId
+      ) {
+        continue;
+      }
       sendSync(socket, snapshot, attachment.playerId);
     }
   }
 
-  private broadcastError(code: ErrorCode, message: string): void {
+  private broadcastError(snapshot: RoomSnapshot, code: ErrorCode, message: string): void {
     for (const socket of this.ctx.getWebSockets()) {
       const attachment = parseAttachment(socket.deserializeAttachment());
       if (attachment?.state !== 'authenticated') continue;
+      if (
+        snapshot.memberships[attachment.playerId]?.activeConnectionId !== attachment.connectionId
+      ) {
+        continue;
+      }
       trySend(socket, { type: 'room/error', code, message });
     }
   }

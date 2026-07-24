@@ -7,6 +7,7 @@ const OTHER_ID = 'c61ecdb5-0476-4503-953b-04567336f436';
 const ATTEMPT_ID = '9e2a5f17-b57f-4ee9-9a7d-b4ae8f2dd1b2';
 const OTHER_ATTEMPT_ID = '2297ac68-da58-4cad-94ae-e5f863beab60';
 const PREPARATION_TOKEN = '018f1f21-9fd8-4c8a-a639-0f6d40ceefab';
+const CONNECTION_ID = '318f1f21-9fd8-4c8a-a639-0f6d40ceefab';
 const DIGEST = 'a'.repeat(64);
 
 describe('durable Room snapshot validation', () => {
@@ -33,7 +34,10 @@ describe('durable Room snapshot validation', () => {
     [
       'extra Membership',
       (snapshot: RoomSnapshot) => {
-        snapshot.memberships[OTHER_ID] = { credentialDigest: DIGEST };
+        snapshot.memberships[OTHER_ID] = {
+          credentialDigest: DIGEST,
+          activeConnectionId: OTHER_ATTEMPT_ID,
+        };
       },
     ],
     [
@@ -76,6 +80,107 @@ describe('durable Room snapshot validation', () => {
     expect(parseRoomSnapshot(validSnapshot())).toEqual(validSnapshot());
   });
 
+  test('accepts an away Membership only with one matching grace deadline', () => {
+    const snapshot = awaySnapshot();
+    expect(parseRoomSnapshot(snapshot)).toEqual(snapshot);
+  });
+
+  test.each([
+    [
+      'an away Membership with an active Connection',
+      (snapshot: RoomSnapshot) => {
+        snapshot.memberships[HOST_ID]!.activeConnectionId = CONNECTION_ID;
+      },
+    ],
+    [
+      'an away Membership without grace',
+      (snapshot: RoomSnapshot) => {
+        snapshot.deadlines = [];
+      },
+    ],
+    [
+      'two grace deadlines for one Membership',
+      (snapshot: RoomSnapshot) => {
+        snapshot.deadlines.push({
+          kind: 'membership-grace',
+          playerId: HOST_ID,
+          connectionId: null,
+          at: 2_000,
+        });
+      },
+    ],
+    [
+      'grace for an unknown Membership',
+      (snapshot: RoomSnapshot) => {
+        snapshot.deadlines[0] = {
+          kind: 'membership-grace',
+          playerId: OTHER_ID,
+          connectionId: null,
+          at: 1_000,
+        };
+      },
+    ],
+  ])('rejects %s', (_label, mutate) => {
+    const snapshot = awaySnapshot();
+    mutate(snapshot);
+    expect(() => parseRoomSnapshot(snapshot)).toThrow();
+  });
+
+  test('rejects more than one phase deadline', () => {
+    const snapshot = preparingSnapshot();
+    snapshot.deadlines.push({
+      kind: 'round-preparation',
+      token: OTHER_ATTEMPT_ID,
+      at: 2_000,
+    });
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('Invalid Room snapshot Deadlines.');
+  });
+
+  test('rejects a grace Connection ID that aliases another active Connection', () => {
+    const snapshot = twoPlayerSnapshot();
+    snapshot.room.players[0]!.away = true;
+    snapshot.memberships[HOST_ID]!.activeConnectionId = null;
+    snapshot.deadlines = [
+      {
+        kind: 'membership-grace',
+        playerId: HOST_ID,
+        connectionId: OTHER_ATTEMPT_ID,
+        at: 1_000,
+      },
+    ];
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('Connection ownership');
+  });
+
+  test('rejects a null grace outside the single initial-host allocation shape', () => {
+    const snapshot = twoPlayerSnapshot();
+    snapshot.room.players[0]!.away = true;
+    snapshot.memberships[HOST_ID]!.activeConnectionId = null;
+    snapshot.deadlines = [
+      {
+        kind: 'membership-grace',
+        playerId: HOST_ID,
+        connectionId: null,
+        at: 1_000,
+      },
+    ];
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('Connection ownership');
+  });
+
+  test('rejects more than one null grace', () => {
+    const snapshot = twoPlayerSnapshot();
+    for (const player of snapshot.room.players) player.away = true;
+    for (const membership of Object.values(snapshot.memberships)) {
+      membership.activeConnectionId = null;
+    }
+    snapshot.deadlines = snapshot.room.players.map((player) => ({
+      kind: 'membership-grace' as const,
+      playerId: player.id,
+      connectionId: null,
+      at: 1_000,
+    }));
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('Connection ownership');
+  });
+
   test('accepts exact preparing and countdown recovery states', () => {
     const preparing = preparingSnapshot();
     expect(parseRoomSnapshot(preparing)).toEqual(preparing);
@@ -102,13 +207,14 @@ describe('durable Room snapshot validation', () => {
     [
       'preparing with a countdown deadline',
       (snapshot: RoomSnapshot) => {
-        snapshot.deadline!.kind = 'countdown';
+        snapshot.deadlines[0]!.kind = 'countdown';
       },
     ],
     [
       'preparing with mismatched tokens',
       (snapshot: RoomSnapshot) => {
-        snapshot.deadline!.token = OTHER_ATTEMPT_ID;
+        if (snapshot.deadlines[0]!.kind === 'membership-grace') throw new Error('Expected phase.');
+        snapshot.deadlines[0]!.token = OTHER_ATTEMPT_ID;
       },
     ],
     [
@@ -133,13 +239,13 @@ describe('durable Room snapshot validation', () => {
     [
       'countdown deadline that disagrees with the Room',
       (snapshot: RoomSnapshot) => {
-        snapshot.deadline!.at += 1;
+        snapshot.deadlines[0]!.at += 1;
       },
     ],
     [
       'countdown with a preparation deadline',
       (snapshot: RoomSnapshot) => {
-        snapshot.deadline!.kind = 'round-preparation';
+        snapshot.deadlines[0]!.kind = 'round-preparation';
       },
     ],
   ])('rejects %s', (_label, mutate) => {
@@ -261,7 +367,10 @@ describe('durable Room snapshot validation', () => {
     [
       'Memberships map',
       (snapshot: RoomSnapshot) => {
-        snapshot.memberships.notAPlayerId = { credentialDigest: DIGEST };
+        snapshot.memberships.notAPlayerId = {
+          credentialDigest: DIGEST,
+          activeConnectionId: CONNECTION_ID,
+        };
       },
     ],
   ])('rejects an unknown key on %s', (_label, mutate) => {
@@ -315,26 +424,29 @@ describe('durable Room snapshot validation', () => {
     [
       'missing racing timeout',
       (snapshot: RoomSnapshot) => {
-        snapshot.deadline = null;
+        snapshot.deadlines = [];
       },
     ],
     [
       'wrong racing timeout kind',
       (snapshot: RoomSnapshot) => {
-        snapshot.deadline!.kind = 'countdown';
-        snapshot.deadline!.token = PREPARATION_TOKEN;
+        Object.assign(snapshot.deadlines[0]!, {
+          kind: 'countdown',
+          token: PREPARATION_TOKEN,
+        });
       },
     ],
     [
       'wrong racing timeout token',
       (snapshot: RoomSnapshot) => {
-        snapshot.deadline!.token = 'round:2:1000';
+        if (snapshot.deadlines[0]!.kind === 'membership-grace') throw new Error('Expected phase.');
+        snapshot.deadlines[0]!.token = 'round:2:1000';
       },
     ],
     [
       'wrong racing timeout instant',
       (snapshot: RoomSnapshot) => {
-        snapshot.deadline!.at += 1;
+        snapshot.deadlines[0]!.at += 1;
       },
     ],
   ])('rejects %s', (_label, mutate) => {
@@ -346,11 +458,13 @@ describe('durable Room snapshot validation', () => {
   test('accepts results only after the racing timeout is cleared', () => {
     const snapshot = resultsSnapshot();
     expect(parseRoomSnapshot(snapshot)).toEqual(snapshot);
-    snapshot.deadline = {
-      kind: 'round-timeout',
-      token: 'round:1:1000',
-      at: 601_000,
-    };
+    snapshot.deadlines = [
+      {
+        kind: 'round-timeout',
+        token: 'round:1:1000',
+        at: 601_000,
+      },
+    ];
     expect(() => parseRoomSnapshot(snapshot)).toThrow('pending runtime state');
   });
 
@@ -367,11 +481,45 @@ function validSnapshot(): RoomSnapshot {
   return {
     schemaVersion: ROOM_SNAPSHOT_VERSION,
     room,
-    memberships: { [HOST_ID]: { credentialDigest: DIGEST } },
+    memberships: {
+      [HOST_ID]: { credentialDigest: DIGEST, activeConnectionId: CONNECTION_ID },
+    },
     joinAttempts: {},
     roundPreparation: null,
-    deadline: null,
+    deadlines: [],
   };
+}
+
+function awaySnapshot(): RoomSnapshot {
+  const snapshot = validSnapshot();
+  snapshot.room.players[0]!.away = true;
+  snapshot.memberships[HOST_ID]!.activeConnectionId = null;
+  snapshot.deadlines = [
+    {
+      kind: 'membership-grace',
+      playerId: HOST_ID,
+      connectionId: null,
+      at: 1_000,
+    },
+  ];
+  return snapshot;
+}
+
+function twoPlayerSnapshot(): RoomSnapshot {
+  const snapshot = validSnapshot();
+  const joined = decide(snapshot.room, {
+    kind: 'client',
+    playerId: OTHER_ID,
+    at: 2,
+    intent: { type: 'room/join', code: 'ABCD', playerName: 'Grace', playerId: OTHER_ID },
+  });
+  if (!joined.ok) throw new Error(joined.message);
+  snapshot.room = joined.events.reduce(reduce, snapshot.room);
+  snapshot.memberships[OTHER_ID] = {
+    credentialDigest: DIGEST,
+    activeConnectionId: OTHER_ATTEMPT_ID,
+  };
+  return snapshot;
 }
 
 function preparingSnapshot(): RoomSnapshot {
@@ -383,11 +531,13 @@ function preparingSnapshot(): RoomSnapshot {
     category: 'any',
     pair: null,
   };
-  snapshot.deadline = {
-    kind: 'round-preparation',
-    token: PREPARATION_TOKEN,
-    at: 1_000,
-  };
+  snapshot.deadlines = [
+    {
+      kind: 'round-preparation',
+      token: PREPARATION_TOKEN,
+      at: 1_000,
+    },
+  ];
   return snapshot;
 }
 
@@ -399,11 +549,13 @@ function countdownSnapshot(): RoomSnapshot {
     startArticle: 'Ada Lovelace',
     goalArticle: 'Analytical Engine',
   };
-  snapshot.deadline = {
-    kind: 'countdown',
-    token: PREPARATION_TOKEN,
-    at: 11_000,
-  };
+  snapshot.deadlines = [
+    {
+      kind: 'countdown',
+      token: PREPARATION_TOKEN,
+      at: 11_000,
+    },
+  ];
   return snapshot;
 }
 
@@ -429,11 +581,13 @@ function racingSnapshot(): RoomSnapshot {
     deadline: 601_000,
   };
   snapshot.room.players[0]!.path = ['Ada Lovelace'];
-  snapshot.deadline = {
-    kind: 'round-timeout',
-    token: 'round:1:1000',
-    at: 601_000,
-  };
+  snapshot.deadlines = [
+    {
+      kind: 'round-timeout',
+      token: 'round:1:1000',
+      at: 601_000,
+    },
+  ];
   return snapshot;
 }
 
@@ -441,6 +595,6 @@ function resultsSnapshot(): RoomSnapshot {
   const snapshot = racingSnapshot();
   snapshot.room.phase = 'results';
   snapshot.room.roundsPlayed = 1;
-  snapshot.deadline = null;
+  snapshot.deadlines = [];
   return snapshot;
 }

@@ -8,7 +8,11 @@ import type {
 import type { RoomSnapshot } from './snapshot.js';
 
 type PendingAttachment = { state: 'pending' };
-type AuthenticatedAttachment = { state: 'authenticated'; playerId: string };
+type AuthenticatedAttachment = {
+  state: 'authenticated';
+  playerId: string;
+  connectionId: string;
+};
 export type ConnectionAttachment = PendingAttachment | AuthenticatedAttachment;
 type SocketWriter = Pick<WebSocket, 'send' | 'close'>;
 
@@ -16,11 +20,17 @@ export function parseAttachment(value: unknown): ConnectionAttachment | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   if (hasExactKeys(record, ['state']) && record.state === 'pending') return { state: 'pending' };
-  return hasExactKeys(record, ['state', 'playerId']) &&
+  return hasExactKeys(record, ['state', 'playerId', 'connectionId']) &&
     record.state === 'authenticated' &&
     typeof record.playerId === 'string' &&
-    isUuid(record.playerId)
-    ? { state: 'authenticated', playerId: record.playerId }
+    isUuid(record.playerId) &&
+    typeof record.connectionId === 'string' &&
+    isUuid(record.connectionId)
+    ? {
+        state: 'authenticated',
+        playerId: record.playerId,
+        connectionId: record.connectionId,
+      }
     : null;
 }
 
@@ -47,7 +57,8 @@ export function parseConnectMessage(raw: string | ArrayBuffer): RoomConnectMessa
   }
 }
 
-type SupportedIntentType = 'game/start' | 'race/hop' | 'race/giveUp' | 'game/playAgain';
+type SupportedIntentType =
+  'game/start' | 'race/hop' | 'race/giveUp' | 'game/playAgain' | 'room/kick';
 export type WorkerPlayerIntent = Extract<ClientIntent, { type: SupportedIntentType }>;
 export type AuthenticatedRoomMessage = WorkerPlayerIntent | 'unsupported' | 'invalid';
 
@@ -68,6 +79,12 @@ export function parseAuthenticatedMessage(raw: string | ArrayBuffer): Authentica
           record.article.trim().length > 0 &&
           record.article === record.article.trim()
           ? { type: 'race/hop', article: record.article }
+          : 'invalid';
+      case 'room/kick':
+        return hasExactKeys(record, ['type', 'playerId']) &&
+          typeof record.playerId === 'string' &&
+          isUuid(record.playerId)
+          ? { type: 'room/kick', playerId: record.playerId }
           : 'invalid';
       default:
         return typeof record.type === 'string' ? 'unsupported' : 'invalid';

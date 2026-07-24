@@ -40,9 +40,10 @@ versioned Room snapshot before sending a full sync. The runtime is selected at b
 time, so Socket.IO is absent from the Worker browser bundle and neither shell routes
 through the other. The Worker path covers protected Room creation, invited Membership
 joining, same-identity reconnection across Durable Object eviction, deterministic
-one-live-Connection replacement, and authenticated host Start through recoverable
-article preparation, a durable countdown, one authoritative racing round, results,
-and host replay. Later Membership lifecycle actions remain on the legacy shell.
+one-live-Connection replacement, disconnect grace and expiry, host removal of active
+or away Memberships, and authenticated host Start through recoverable article
+preparation, a durable countdown, one authoritative racing round, results, and host
+replay.
 
 Invited joining uses a two-step durable handshake. The browser gives the join POST one
 high-entropy attempt ID and a monotonic request generation. An ambiguous-response retry
@@ -55,6 +56,24 @@ WebSocket that proves the current credential transactionally promotes the reserv
 into Room state and only then broadcasts it. If its first sync is lost, reload can
 reclaim the promoted Membership from the pre-auth browser record. A completed attempt
 cannot be replayed because the raw credential is never recoverable from server storage.
+
+Worker Membership presence is durable, fenced, and ephemeral. Each Membership stores
+only its credential digest and current Connection ID. Authentication first claims a
+new Connection ID transactionally; only that exact prior connection may be replaced,
+and a later close from the displaced socket cannot mark the Player away. A real close
+or error marks the Player away and adds a 45-second grace deadline keyed to the closed
+Connection. Reauthentication within grace preserves the Player ID, score, path, and
+host authority while canceling eviction. The grace instant itself is expired:
+authentication must commit strictly before it, even if alarm delivery is late. Every
+authenticated mutation also rechecks the attachment Connection ID against persisted
+ownership inside the transaction that decides and writes, so queued work from a
+displaced socket is inert. Expiry folds `PlayerLeft`, transfers host authority through
+the game core, and ends a race if the departed Player was its final unfinished racer.
+Expiry of the final Membership deletes the Room snapshot so the code is absent and may
+be claimed again. In the lobby, a host kick commits Player, Membership, join-attempt,
+and deadline removal before the target receives its terminal signal; kicked and
+invalid clients delete their browser credential, while a connection-replaced tab
+retains it for the winning tab.
 
 Worker Round preparation is an explicit Room phase. Accepted Start persists the
 preparing Room, one generation token, the chosen difficulty/category, and one typed
@@ -103,16 +122,20 @@ Legality — what is never allowed:
   URLs, logs, socket attachments, or syncs, and it cannot reclaim a promoted Membership.
 - Join request generations only increase, and every pending or promoted attempt owns a
   distinct Player ID. The Room rejects stale rotations; snapshot validation rejects aliases.
-- Worker future transitions have one owner: the persisted typed Deadline and Durable Object
-  alarm. Worker Room code never uses JavaScript timers, and an async preparation result must
-  still own the persisted generation token before it may change Room state.
+- Worker future transitions have one owner: the persisted typed Deadline schedule and
+  Durable Object alarm. Snapshot v5 allows at most one phase transition plus concurrent
+  Membership grace deadlines. The alarm targets the deterministic earliest item,
+  processes one due item, and re-arms from persisted state. Worker Room code never uses
+  JavaScript timers, and an async preparation result must still own the persisted
+  generation token before it may change Room state.
 
 ## Standing decisions
 
 - **Server-authoritative, ephemeral Rooms.** Scores remain per-session and no permanent
   match history is retained. The Cloudflare runtime stores a versioned snapshot in
   one SQLite-backed Durable Object per Room so eviction does not erase a live session;
-  this is lifecycle durability, not a user database.
+  this is lifecycle durability, not a user database. A Room with no Memberships is
+  deleted rather than retained as permanent history.
 - **Cloudflare is the production target.** Static assets, HTTP allocation, and
   WebSockets share one Worker origin. Room code names the Durable Object. The
   declarative `exports` configuration owns the SQLite class lifecycle; no D1, KV,

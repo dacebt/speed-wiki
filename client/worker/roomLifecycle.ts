@@ -6,7 +6,9 @@ import {
   roundTimeoutToken,
   type RoomSnapshot,
 } from './snapshot.js';
+import { nextDeadline, phaseDeadline, replacePhaseDeadline, syncAlarm } from './roomSchedule.js';
 import { finishRoundTimeout } from './roomGameplay.js';
+import { expireMembershipGrace } from './roomPresence.js';
 import { pickPair } from './wikipedia.js';
 
 const PREPARATION_ALARM_DELAY_MS = 500;
@@ -18,41 +20,53 @@ export type StartPreparationResult =
 
 export type AlarmResult =
   | { kind: 'none' }
+  | { kind: 'deleted' }
   | { kind: 'sync'; snapshot: RoomSnapshot }
   | { kind: 'error'; code: ErrorCode; message: string; snapshot: RoomSnapshot };
 
 export async function startRoundPreparation(
   state: DurableObjectState,
   playerId: string,
+  connectionId: string,
 ): Promise<StartPreparationResult> {
   const at = Date.now();
-  const current = await loadSnapshot(state);
-  if (!current) {
-    return { kind: 'error', code: 'room-not-found', message: 'No room found with that code.' };
-  }
-  const authorization = decide(current.room, {
-    kind: 'client',
-    playerId,
-    at,
-    intent: { type: 'game/start' },
-  });
-  if (!authorization.ok) {
-    return { kind: 'error', code: authorization.code, message: authorization.message };
-  }
-
   const alarmAt = at + PREPARATION_ALARM_DELAY_MS;
-  const snapshot = await state.storage.transaction(async (transaction) => {
+  return state.storage.transaction(async (transaction): Promise<StartPreparationResult> => {
     const stored = await transaction.get(ROOM_STORAGE_KEY);
-    if (stored === undefined) return null;
+    if (stored === undefined) {
+      return { kind: 'error', code: 'room-not-found', message: 'No room found with that code.' };
+    }
     const currentSnapshot = parseRoomSnapshot(stored);
+    const membership = currentSnapshot.memberships[playerId];
+    if (!membership) {
+      return {
+        kind: 'error',
+        code: 'invalid-membership',
+        message: 'The Room Membership is invalid.',
+      };
+    }
+    if (membership.activeConnectionId !== connectionId) {
+      return {
+        kind: 'error',
+        code: 'connection-replaced',
+        message: 'This Room Membership was opened in another tab.',
+      };
+    }
     const decision = decide(currentSnapshot.room, {
       kind: 'client',
       playerId,
       at,
       intent: { type: 'game/start' },
     });
-    if (!decision.ok) return null;
+    if (!decision.ok) {
+      return { kind: 'error', code: decision.code, message: decision.message };
+    }
     const token = crypto.randomUUID();
+    const deadlines = replacePhaseDeadline(currentSnapshot.deadlines, {
+      kind: 'round-preparation',
+      token,
+      at: alarmAt,
+    });
     const next: RoomSnapshot = {
       ...currentSnapshot,
       room: decision.events.reduce(reduce, currentSnapshot.room),
@@ -62,30 +76,27 @@ export async function startRoundPreparation(
         category: currentSnapshot.room.settings.category,
         pair: null,
       },
-      deadline: { kind: 'round-preparation', token, at: alarmAt },
+      deadlines,
     };
     parseRoomSnapshot(next);
     await transaction.put(ROOM_STORAGE_KEY, next);
-    await transaction.setAlarm(alarmAt);
-    return next;
+    await syncAlarm(transaction, deadlines);
+    return { kind: 'sync', snapshot: next };
   });
-  return snapshot
-    ? { kind: 'sync', snapshot }
-    : {
-        kind: 'error',
-        code: 'wrong-phase',
-        message: 'The Room changed before the race could start.',
-      };
 }
 
 export async function processRoomAlarm(state: DurableObjectState): Promise<AlarmResult> {
   const snapshot = await loadSnapshot(state);
-  if (!snapshot?.deadline) return { kind: 'none' };
-  if (Date.now() < snapshot.deadline.at) {
-    await state.storage.setAlarm(snapshot.deadline.at);
+  if (!snapshot) return { kind: 'none' };
+  const deadline = nextDeadline(snapshot.deadlines);
+  if (!deadline) return { kind: 'none' };
+  if (Date.now() < deadline.at) {
+    await syncAlarm(state.storage, snapshot.deadlines);
     return { kind: 'none' };
   }
-  switch (snapshot.deadline.kind) {
+  switch (deadline.kind) {
+    case 'membership-grace':
+      return expireMembershipGrace(state, deadline);
     case 'round-preparation':
       return prepareRound(state, snapshot);
     case 'countdown':
@@ -100,12 +111,13 @@ async function prepareRound(
   snapshot: RoomSnapshot,
 ): Promise<AlarmResult> {
   const preparation = snapshot.roundPreparation;
+  const deadline = phaseDeadline(snapshot.deadlines);
   if (
     snapshot.room.phase !== 'preparing' ||
     !preparation ||
     preparation.pair !== null ||
-    snapshot.deadline?.kind !== 'round-preparation' ||
-    snapshot.deadline.token !== preparation.token
+    deadline?.kind !== 'round-preparation' ||
+    deadline.token !== preparation.token
   ) {
     return { kind: 'none' };
   }
@@ -129,12 +141,13 @@ async function prepareRound(
     const stored = await transaction.get(ROOM_STORAGE_KEY);
     if (stored === undefined) return null;
     const current = parseRoomSnapshot(stored);
+    const currentDeadline = phaseDeadline(current.deadlines);
     if (
       current.room.phase !== 'preparing' ||
       current.roundPreparation?.token !== preparation.token ||
       current.roundPreparation.pair !== null ||
-      current.deadline?.kind !== 'round-preparation' ||
-      current.deadline.token !== preparation.token
+      currentDeadline?.kind !== 'round-preparation' ||
+      currentDeadline.token !== preparation.token
     ) {
       return null;
     }
@@ -147,15 +160,20 @@ async function prepareRound(
     if (!decision.ok || decision.events.length === 0) return null;
     const room = decision.events.reduce(reduce, current.room);
     if (room.countdownEndsAt === null) return null;
+    const deadlines = replacePhaseDeadline(current.deadlines, {
+      kind: 'countdown',
+      token: preparation.token,
+      at: room.countdownEndsAt,
+    });
     const next: RoomSnapshot = {
       ...current,
       room,
       roundPreparation: { ...current.roundPreparation, pair },
-      deadline: { kind: 'countdown', token: preparation.token, at: room.countdownEndsAt },
+      deadlines,
     };
     parseRoomSnapshot(next);
     await transaction.put(ROOM_STORAGE_KEY, next);
-    await transaction.setAlarm(room.countdownEndsAt);
+    await syncAlarm(transaction, deadlines);
     return next;
   });
   return selected ? { kind: 'sync', snapshot: selected } : { kind: 'none' };
@@ -169,25 +187,27 @@ async function abortPreparation(
     const stored = await transaction.get(ROOM_STORAGE_KEY);
     if (stored === undefined) return null;
     const current = parseRoomSnapshot(stored);
+    const deadline = phaseDeadline(current.deadlines);
     if (
       current.room.phase !== 'preparing' ||
       current.roundPreparation?.token !== token ||
-      current.deadline?.kind !== 'round-preparation' ||
-      current.deadline.token !== token
+      deadline?.kind !== 'round-preparation' ||
+      deadline.token !== token
     ) {
       return null;
     }
     const decision = decide(current.room, { kind: 'sys/roundStartFailed', at: Date.now() });
     if (!decision.ok || decision.events.length === 0) return null;
+    const deadlines = replacePhaseDeadline(current.deadlines, null);
     const next: RoomSnapshot = {
       ...current,
       room: decision.events.reduce(reduce, current.room),
       roundPreparation: null,
-      deadline: null,
+      deadlines,
     };
     parseRoomSnapshot(next);
     await transaction.put(ROOM_STORAGE_KEY, next);
-    await transaction.deleteAlarm();
+    await syncAlarm(transaction, deadlines);
     return next;
   });
 }
@@ -197,11 +217,12 @@ async function finishCountdown(
   snapshot: RoomSnapshot,
 ): Promise<AlarmResult> {
   const preparation = snapshot.roundPreparation;
+  const deadline = phaseDeadline(snapshot.deadlines);
   if (
     snapshot.room.phase !== 'countdown' ||
     !preparation?.pair ||
-    snapshot.deadline?.kind !== 'countdown' ||
-    snapshot.deadline.token !== preparation.token
+    deadline?.kind !== 'countdown' ||
+    deadline.token !== preparation.token
   ) {
     return { kind: 'none' };
   }
@@ -209,12 +230,13 @@ async function finishCountdown(
     const stored = await transaction.get(ROOM_STORAGE_KEY);
     if (stored === undefined) return null;
     const current = parseRoomSnapshot(stored);
+    const currentDeadline = phaseDeadline(current.deadlines);
     if (
       current.room.phase !== 'countdown' ||
       current.roundPreparation?.token !== preparation.token ||
       !current.roundPreparation.pair ||
-      current.deadline?.kind !== 'countdown' ||
-      current.deadline.token !== preparation.token
+      currentDeadline?.kind !== 'countdown' ||
+      currentDeadline.token !== preparation.token
     ) {
       return null;
     }
@@ -228,19 +250,20 @@ async function finishCountdown(
     if (!decision.ok || decision.events.length === 0) return null;
     const room = decision.events.reduce(reduce, current.room);
     if (!room.round) return null;
+    const deadlines = replacePhaseDeadline(current.deadlines, {
+      kind: 'round-timeout',
+      token: roundTimeoutToken(room.round),
+      at: room.round.deadline,
+    });
     const next: RoomSnapshot = {
       ...current,
       room,
       roundPreparation: null,
-      deadline: {
-        kind: 'round-timeout',
-        token: roundTimeoutToken(room.round),
-        at: room.round.deadline,
-      },
+      deadlines,
     };
     parseRoomSnapshot(next);
     await transaction.put(ROOM_STORAGE_KEY, next);
-    await transaction.setAlarm(room.round.deadline);
+    await syncAlarm(transaction, deadlines);
     return next;
   });
   return started ? { kind: 'sync', snapshot: started } : { kind: 'none' };

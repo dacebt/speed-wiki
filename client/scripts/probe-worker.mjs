@@ -197,10 +197,53 @@ try {
   await Promise.all([hostLobbyAgain, guestLobbyAgain]);
   const playedAgain = true;
 
+  const replacementPage = await guestContext.newPage();
+  const replacementLobby = replacementPage.getByRole('heading', { name: 'Lobby' }).waitFor();
+  const oldConnectionReplaced = guestPage
+    .getByText('This Room Membership was opened in another tab.', { exact: true })
+    .waitFor();
+  await replacementPage.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await Promise.all([replacementLobby, oldConnectionReplaced]);
+  await guestPage.getByRole('heading', { name: 'Wiki Speedrun' }).waitFor();
+  const replacementMembership = await replacementPage.evaluate((code) => {
+    const raw = localStorage.getItem(`wikispeedrun.room.${code}.membership`);
+    return raw === null ? null : JSON.parse(raw);
+  }, roomCode);
+  if (
+    replacementMembership?.playerId !== guestMembership.playerId ||
+    replacementMembership?.rejoinCredential !== guestMembership.rejoinCredential
+  ) {
+    throw new Error('Replacement tab did not retain the same Room Membership.');
+  }
+  await waitUntil(
+    async () => (await page.locator('.lobby__player').count()) === 2,
+    'replacement tab host sync',
+  );
+  const replaced = true;
+
+  const replacementKicked = replacementPage
+    .getByText('The host removed you from the Room.', { exact: true })
+    .waitFor();
+  await page.getByRole('button', { name: 'Remove Invited Guest' }).click();
+  await replacementKicked;
+  await replacementPage.getByRole('heading', { name: 'Wiki Speedrun' }).waitFor();
+  const removedMembership = await replacementPage.evaluate(
+    (code) => localStorage.getItem(`wikispeedrun.room.${code}.membership`),
+    roomCode,
+  );
+  if (removedMembership !== null) {
+    throw new Error('Kicked browser retained its Room Membership credential.');
+  }
+  await waitUntil(
+    async () => (await page.locator('.lobby__player').count()) === 1,
+    'host kick sync',
+  );
+  const kicked = true;
+
   console.log(
     JSON.stringify({
       phase: 'lobby',
-      players: 2,
+      players: 1,
       host: true,
       roomCode,
       createPosts: postCount,
@@ -214,6 +257,8 @@ try {
       scores,
       roundPoints,
       playedAgain,
+      replaced,
+      kicked,
       startArticle: hostPair[0],
       goalArticle: hostPair[1],
       surface: 'react',

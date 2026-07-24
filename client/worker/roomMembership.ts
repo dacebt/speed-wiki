@@ -12,6 +12,7 @@ import {
   parseRoomSnapshot,
   type RoomSnapshot,
 } from './snapshot.js';
+import { MEMBERSHIP_GRACE_MS, removeMembershipGrace, syncAlarm } from './roomSchedule.js';
 
 export type CreateRoomClaim =
   ({ ok: true } & CreateRoomResponse) | { ok: false; reason: 'claimed' | 'invalid-request' };
@@ -20,7 +21,13 @@ export type JoinRoomClaim =
   ({ ok: true } & JoinRoomResponse) | { ok: false; code: ErrorCode; message: string };
 
 export type AuthenticationResult =
-  { ok: false } | { ok: true; snapshot: RoomSnapshot; promoted: boolean };
+  | { ok: false }
+  | {
+      ok: true;
+      snapshot: RoomSnapshot;
+      promoted: boolean;
+      previousConnectionId: string | null;
+    };
 
 type JoinTransactionResult =
   | Exclude<JoinRoomClaim, { ok: true }>
@@ -42,26 +49,33 @@ export async function createRoomClaim(
   const rejoinCredential = randomCredential();
   const credentialDigest = await digestCredential(rejoinCredential);
   const room = initialRoom(code);
+  const at = Date.now();
   const decision = decide(room, {
     kind: 'client',
     playerId,
-    at: Date.now(),
+    at,
     intent: { type: 'room/create', playerName, playerId },
   });
   if (!decision.ok) return { ok: false, reason: 'invalid-request' };
+  const joined = decision.events.reduce(reduce, room);
+  const away = decide(joined, { kind: 'sys/playerAway', playerId, at });
+  if (!away.ok) return { ok: false, reason: 'invalid-request' };
+  const graceAt = at + MEMBERSHIP_GRACE_MS;
 
   const snapshot: RoomSnapshot = {
     schemaVersion: ROOM_SNAPSHOT_VERSION,
-    room: decision.events.reduce(reduce, room),
-    memberships: { [playerId]: { credentialDigest } },
+    room: away.events.reduce(reduce, joined),
+    memberships: { [playerId]: { credentialDigest, activeConnectionId: null } },
     joinAttempts: {},
     roundPreparation: null,
-    deadline: null,
+    deadlines: [{ kind: 'membership-grace', playerId, connectionId: null, at: graceAt }],
   };
+  parseRoomSnapshot(snapshot);
   const claimed = await state.storage.transaction(async (transaction) => {
     const existing = await transaction.get(ROOM_STORAGE_KEY);
     if (existing !== undefined) return false;
     await transaction.put(ROOM_STORAGE_KEY, snapshot);
+    await syncAlarm(transaction, snapshot.deadlines);
     return true;
   });
   return claimed
@@ -138,6 +152,7 @@ export async function authenticateMembership(
   state: DurableObjectState,
   playerId: string,
   rejoinCredential: string,
+  connectionId: string,
 ): Promise<AuthenticationResult> {
   const suppliedDigest = await digestCredential(rejoinCredential);
   return state.storage.transaction(async (transaction): Promise<AuthenticationResult> => {
@@ -146,7 +161,43 @@ export async function authenticateMembership(
     const snapshot = parseRoomSnapshot(stored);
     const membership = snapshot.memberships[playerId];
     if (membership?.credentialDigest === suppliedDigest) {
-      return { ok: true, snapshot, promoted: false };
+      const at = Date.now();
+      if (membership.activeConnectionId === null) {
+        const grace = snapshot.deadlines.find(
+          (deadline) => deadline.kind === 'membership-grace' && deadline.playerId === playerId,
+        );
+        if (!grace || at >= grace.at) return { ok: false };
+      }
+      const decision = decide(snapshot.room, {
+        kind: 'client',
+        playerId,
+        at,
+        intent: {
+          type: 'room/join',
+          code: snapshot.room.code,
+          playerName: snapshot.room.players.find((player) => player.id === playerId)?.name ?? '',
+          playerId,
+        },
+      });
+      if (!decision.ok) return { ok: false };
+      const next: RoomSnapshot = {
+        ...snapshot,
+        room: decision.events.reduce(reduce, snapshot.room),
+        memberships: {
+          ...snapshot.memberships,
+          [playerId]: { ...membership, activeConnectionId: connectionId },
+        },
+        deadlines: removeMembershipGrace(snapshot.deadlines, playerId),
+      };
+      parseRoomSnapshot(next);
+      await transaction.put(ROOM_STORAGE_KEY, next);
+      await syncAlarm(transaction, next.deadlines);
+      return {
+        ok: true,
+        snapshot: next,
+        promoted: false,
+        previousConnectionId: membership.activeConnectionId,
+      };
     }
 
     const pendingEntry = Object.entries(snapshot.joinAttempts).find(
@@ -156,6 +207,13 @@ export async function authenticateMembership(
         attempt.credentialDigest === suppliedDigest,
     );
     if (!pendingEntry) return { ok: false };
+    if (
+      snapshot.deadlines.some(
+        (deadline) => deadline.kind === 'membership-grace' && deadline.connectionId === null,
+      )
+    ) {
+      return { ok: false };
+    }
     const [attemptId, pending] = pendingEntry;
     if (pending.state !== 'pending') return { ok: false };
     const decision = decide(snapshot.room, {
@@ -175,15 +233,26 @@ export async function authenticateMembership(
       room: decision.events.reduce(reduce, snapshot.room),
       memberships: {
         ...snapshot.memberships,
-        [playerId]: { credentialDigest: pending.credentialDigest },
+        [playerId]: {
+          credentialDigest: pending.credentialDigest,
+          activeConnectionId: connectionId,
+        },
       },
       joinAttempts: {
         ...snapshot.joinAttempts,
         [attemptId]: { state: 'promoted', playerId },
       },
+      deadlines: removeMembershipGrace(snapshot.deadlines, playerId),
     };
+    parseRoomSnapshot(next);
     await transaction.put(ROOM_STORAGE_KEY, next);
-    return { ok: true, snapshot: next, promoted: true };
+    await syncAlarm(transaction, next.deadlines);
+    return {
+      ok: true,
+      snapshot: next,
+      promoted: true,
+      previousConnectionId: null,
+    };
   });
 }
 

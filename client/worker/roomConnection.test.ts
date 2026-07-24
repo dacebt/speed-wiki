@@ -7,19 +7,33 @@ import {
 } from './roomConnection.js';
 
 const PLAYER_ID = '1f6f49f6-30d5-4fb7-bab8-d015bf878fe8';
+const CONNECTION_ID = '318f1f21-9fd8-4c8a-a639-0f6d40ceefab';
 const CREDENTIAL = 'A'.repeat(43);
 
 describe('Room Connection exact validation', () => {
   test('accepts only exact pending and authenticated attachments', () => {
     expect(parseAttachment({ state: 'pending' })).toEqual({ state: 'pending' });
-    expect(parseAttachment({ state: 'authenticated', playerId: PLAYER_ID })).toEqual({
+    expect(
+      parseAttachment({
+        state: 'authenticated',
+        playerId: PLAYER_ID,
+        connectionId: CONNECTION_ID,
+      }),
+    ).toEqual({
       state: 'authenticated',
       playerId: PLAYER_ID,
+      connectionId: CONNECTION_ID,
     });
     expect(parseAttachment({ state: 'pending', extra: true })).toBeNull();
     expect(
-      parseAttachment({ state: 'authenticated', playerId: PLAYER_ID, extra: true }),
+      parseAttachment({
+        state: 'authenticated',
+        playerId: PLAYER_ID,
+        connectionId: CONNECTION_ID,
+        extra: true,
+      }),
     ).toBeNull();
+    expect(parseAttachment({ state: 'authenticated', playerId: PLAYER_ID })).toBeNull();
     expect(parseAttachment({ state: 'authenticated', playerId: 'public-id' })).toBeNull();
   });
 
@@ -74,7 +88,18 @@ describe('Room Connection exact validation', () => {
     expect(parseAuthenticatedMessage(JSON.stringify({ type: 'game/playAgain', extra: true }))).toBe(
       'invalid',
     );
-    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'room/kick' }))).toBe('unsupported');
+    expect(
+      parseAuthenticatedMessage(JSON.stringify({ type: 'room/kick', playerId: PLAYER_ID })),
+    ).toEqual({ type: 'room/kick', playerId: PLAYER_ID });
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'room/kick' }))).toBe('invalid');
+    expect(
+      parseAuthenticatedMessage(
+        JSON.stringify({ type: 'room/kick', playerId: PLAYER_ID, extra: true }),
+      ),
+    ).toBe('invalid');
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'room/setSettings' }))).toBe(
+      'unsupported',
+    );
     expect(parseAuthenticatedMessage(new ArrayBuffer(0))).toBe('invalid');
   });
 

@@ -1,6 +1,7 @@
 import { decide, reduce } from '@wikispeedrun/game';
 import type { ErrorCode } from '@wikispeedrun/shared';
 import type { WorkerPlayerIntent } from './roomConnection.js';
+import { phaseDeadline, replacePhaseDeadline, syncAlarm } from './roomSchedule.js';
 import {
   ROOM_STORAGE_KEY,
   parseRoomSnapshot,
@@ -8,7 +9,7 @@ import {
   type RoomSnapshot,
 } from './snapshot.js';
 
-type GameplayIntent = Exclude<WorkerPlayerIntent, { type: 'game/start' }>;
+type GameplayIntent = Exclude<WorkerPlayerIntent, { type: 'game/start' | 'room/kick' }>;
 
 export type PlayerIntentResult =
   | { kind: 'none' }
@@ -20,6 +21,7 @@ type TimeoutResult = { kind: 'none' } | { kind: 'sync'; snapshot: RoomSnapshot }
 export async function processPlayerIntent(
   state: DurableObjectState,
   playerId: string,
+  connectionId: string,
   intent: GameplayIntent,
 ): Promise<PlayerIntentResult> {
   const at = Date.now();
@@ -29,10 +31,26 @@ export async function processPlayerIntent(
       return { kind: 'error', code: 'room-not-found', message: 'No room found with that code.' };
     }
     const current = parseRoomSnapshot(stored);
+    const membership = current.memberships[playerId];
+    if (!membership) {
+      return {
+        kind: 'error',
+        code: 'invalid-membership',
+        message: 'The Room Membership is invalid.',
+      };
+    }
+    if (membership.activeConnectionId !== connectionId) {
+      return {
+        kind: 'error',
+        code: 'connection-replaced',
+        message: 'This Room Membership was opened in another tab.',
+      };
+    }
+    const deadline = phaseDeadline(current.deadlines);
     if (
       current.room.phase === 'racing' &&
-      current.deadline?.kind === 'round-timeout' &&
-      at >= current.deadline.at
+      deadline?.kind === 'round-timeout' &&
+      at >= deadline.at
     ) {
       return {
         kind: 'error',
@@ -47,15 +65,17 @@ export async function processPlayerIntent(
     if (decision.events.length === 0) return { kind: 'none' };
 
     const room = decision.events.reduce(reduce, current.room);
+    const deadlines =
+      room.phase === 'racing' ? current.deadlines : replacePhaseDeadline(current.deadlines, null);
     const next: RoomSnapshot = {
       ...current,
       room,
       roundPreparation: null,
-      deadline: room.phase === 'racing' ? current.deadline : null,
+      deadlines,
     };
     parseRoomSnapshot(next);
     await transaction.put(ROOM_STORAGE_KEY, next);
-    if (room.phase !== 'racing') await transaction.deleteAlarm();
+    await syncAlarm(transaction, deadlines);
     return { kind: 'sync', snapshot: next };
   });
 }
@@ -64,7 +84,7 @@ export async function finishRoundTimeout(
   state: DurableObjectState,
   snapshot: RoomSnapshot,
 ): Promise<TimeoutResult> {
-  const deadline = snapshot.deadline;
+  const deadline = phaseDeadline(snapshot.deadlines);
   if (
     snapshot.room.phase !== 'racing' ||
     !snapshot.room.round ||
@@ -79,26 +99,28 @@ export async function finishRoundTimeout(
     const stored = await transaction.get(ROOM_STORAGE_KEY);
     if (stored === undefined) return { kind: 'none' };
     const current = parseRoomSnapshot(stored);
+    const currentDeadline = phaseDeadline(current.deadlines);
     if (
       current.room.phase !== 'racing' ||
       !current.room.round ||
-      current.deadline?.kind !== 'round-timeout' ||
-      current.deadline.token !== deadline.token ||
-      current.deadline.at !== deadline.at
+      currentDeadline?.kind !== 'round-timeout' ||
+      currentDeadline.token !== deadline.token ||
+      currentDeadline.at !== deadline.at
     ) {
       return { kind: 'none' };
     }
     const decision = decide(current.room, { kind: 'sys/roundTimedOut', at: Date.now() });
     if (!decision.ok || decision.events.length === 0) return { kind: 'none' };
+    const deadlines = replacePhaseDeadline(current.deadlines, null);
     const next: RoomSnapshot = {
       ...current,
       room: decision.events.reduce(reduce, current.room),
       roundPreparation: null,
-      deadline: null,
+      deadlines,
     };
     parseRoomSnapshot(next);
     await transaction.put(ROOM_STORAGE_KEY, next);
-    await transaction.deleteAlarm();
+    await syncAlarm(transaction, deadlines);
     return { kind: 'sync', snapshot: next };
   });
 }

@@ -13,6 +13,7 @@ import {
   RoomRequestError,
 } from './roomApi.js';
 import {
+  deleteRoomMembership,
   loadRoomMembership,
   persistRoomMembership,
   type StoredMembershipResult,
@@ -30,6 +31,7 @@ export const supportsInvitedJoining = true;
 export const supportsLobbyActions = false;
 export const supportsRoundStart = true;
 export const supportsRaceActions = true;
+export const supportsKick = true;
 export { parseRoomMembershipResponse as parseCreateRoomResponse };
 
 let claimedInviteMembership: RoomMembership | null = null;
@@ -244,6 +246,9 @@ function openMembership(
         terminateOwned(version, membership, code, message);
         return;
       }
+      if (code === 'kicked' || code === 'invalid-membership') {
+        deleteTerminalMembership(membership.roomCode);
+      }
       finishFailure(code, message);
     }
 
@@ -300,6 +305,9 @@ function openMembership(
       if (connection === socket) connection = null;
       const failure = closeFailure(event);
       if (!synced) {
+        if (failure.code === 'invalid-membership') {
+          deleteTerminalMembership(membership.roomCode);
+        }
         finishFailure(failure.code, failure.message);
         return;
       }
@@ -398,7 +406,18 @@ function terminateOwned(
   message: string,
 ): void {
   if (sessionVersion !== version || activeMembership !== membership) return;
+  if (code === 'kicked' || code === 'invalid-membership') {
+    deleteTerminalMembership(membership.roomCode);
+  }
   terminate(code, message);
+}
+
+function deleteTerminalMembership(roomCode: string): void {
+  try {
+    deleteRoomMembership(roomCode);
+  } catch {
+    // Terminal UI and connection teardown still have to complete when storage is unavailable.
+  }
 }
 
 function cancelReconnect(reason: string): void {

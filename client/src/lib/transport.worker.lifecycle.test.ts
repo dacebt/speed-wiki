@@ -310,6 +310,109 @@ describe('Worker Connection ownership', () => {
       code: 'connection-replaced',
       message: 'This Room Membership was opened in another tab.',
     });
+    expect(localStorage.removeItem).not.toHaveBeenCalled();
+    expect(sockets).toHaveLength(1);
+    cleanup();
+  });
+
+  test('a kick deletes the stored Membership before publishing the terminal signal', async () => {
+    stubBrowser('');
+    const transport = await import('./transport.worker.js');
+    const terminalOrder: string[] = [];
+    vi.mocked(localStorage.removeItem).mockImplementation(() => {
+      terminalOrder.push('deleted');
+    });
+    const cleanup = transport.subscribe({
+      onMessage: vi.fn(),
+      onConnect: vi.fn(),
+      onDisconnect: vi.fn((event) => {
+        if (event.type === 'terminal') terminalOrder.push(event.code);
+      }),
+    });
+    await Promise.resolve();
+    sockets[0]!.open();
+    sockets[0]!.message({
+      type: 'room/sync',
+      room: workerTransportLobby(),
+      you: PLAYER_ID,
+      at: 1,
+    });
+    sockets[0]!.message({
+      type: 'room/error',
+      code: 'kicked',
+      message: 'The host removed you from the Room.',
+    });
+    await Promise.resolve();
+
+    expect(localStorage.removeItem).toHaveBeenCalledWith('wikispeedrun.room.ABCD.membership');
+    expect(terminalOrder).toEqual(['deleted', 'kicked']);
+    expect(sockets).toHaveLength(1);
+    cleanup();
+  });
+
+  test('an invalid-membership close deletes the stored Membership without reconnecting', async () => {
+    stubBrowser('');
+    const transport = await import('./transport.worker.js');
+    const onDisconnect = vi.fn();
+    const cleanup = transport.subscribe({
+      onMessage: vi.fn(),
+      onConnect: vi.fn(),
+      onDisconnect,
+    });
+    await Promise.resolve();
+    sockets[0]!.open();
+    sockets[0]!.message({
+      type: 'room/sync',
+      room: workerTransportLobby(),
+      you: PLAYER_ID,
+      at: 1,
+    });
+    sockets[0]!.close(4003, 'Membership invalid.');
+    await Promise.resolve();
+
+    expect(localStorage.removeItem).toHaveBeenCalledWith('wikispeedrun.room.ABCD.membership');
+    expect(onDisconnect).toHaveBeenLastCalledWith({
+      type: 'terminal',
+      code: 'invalid-membership',
+      message: 'The Room Membership is invalid.',
+    });
+    expect(sockets).toHaveLength(1);
+    cleanup();
+  });
+
+  test('a storage deletion failure cannot suppress the kicked terminal signal', async () => {
+    stubBrowser('');
+    vi.mocked(localStorage.removeItem).mockImplementation(() => {
+      throw new Error('storage unavailable');
+    });
+    const transport = await import('./transport.worker.js');
+    const onDisconnect = vi.fn();
+    const cleanup = transport.subscribe({
+      onMessage: vi.fn(),
+      onConnect: vi.fn(),
+      onDisconnect,
+    });
+    await Promise.resolve();
+    sockets[0]!.open();
+    sockets[0]!.message({
+      type: 'room/sync',
+      room: workerTransportLobby(),
+      you: PLAYER_ID,
+      at: 1,
+    });
+    sockets[0]!.message({
+      type: 'room/error',
+      code: 'kicked',
+      message: 'The host removed you from the Room.',
+    });
+    await Promise.resolve();
+
+    expect(localStorage.removeItem).toHaveBeenCalledWith('wikispeedrun.room.ABCD.membership');
+    expect(onDisconnect).toHaveBeenLastCalledWith({
+      type: 'terminal',
+      code: 'kicked',
+      message: 'The host removed you from the Room.',
+    });
     expect(sockets).toHaveLength(1);
     cleanup();
   });
