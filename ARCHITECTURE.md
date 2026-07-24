@@ -57,23 +57,35 @@ into Room state and only then broadcasts it. If its first sync is lost, reload c
 reclaim the promoted Membership from the pre-auth browser record. A completed attempt
 cannot be replayed because the raw credential is never recoverable from server storage.
 
-Worker Membership presence is durable, fenced, and ephemeral. Each Membership stores
-only its credential digest and current Connection ID. Authentication first claims a
-new Connection ID transactionally; only that exact prior connection may be replaced,
-and a later close from the displaced socket cannot mark the Player away. A real close
-or error marks the Player away and adds a 45-second grace deadline keyed to the closed
-Connection. Reauthentication within grace preserves the Player ID, score, path, and
-host authority while canceling eviction. The grace instant itself is expired:
-authentication must commit strictly before it, even if alarm delivery is late. Every
-authenticated mutation also rechecks the attachment Connection ID against persisted
-ownership inside the transaction that decides and writes, so queued work from a
-displaced socket is inert. Expiry folds `PlayerLeft`, transfers host authority through
-the game core, and ends a race if the departed Player was its final unfinished racer.
-Expiry of the final Membership deletes the Room snapshot so the code is absent and may
-be claimed again. In the lobby, a host kick commits Player, Membership, join-attempt,
-and deadline removal before the target receives its terminal signal; kicked and
-invalid clients delete their browser credential, while a connection-replaced tab
-retains it for the winning tab.
+Worker Membership presence is durable, fenced, bounded, and ephemeral. Each Membership
+stores only its credential digest, current Connection ID, and fixed-window message
+counter. Authentication first claims a new Connection ID and one of the Membership's
+20 messages per 10-second window in the same transaction; only that exact prior
+connection may be replaced, and a later close from the displaced socket cannot mark the
+Player away or spend its quota. The counter survives connection replacement and
+Durable Object eviction. A real close or error marks the Player away and adds a
+45-second grace deadline keyed to the closed Connection. Reauthentication within grace
+preserves the Player ID, score, path, host authority, and message window while canceling
+eviction. The grace instant itself is expired: authentication must commit strictly
+before it, even if alarm delivery is late. Every authenticated mutation also rechecks
+the attachment Connection ID and spends quota inside the transaction that decides and
+writes, so queued work from a displaced socket is inert. Expiry folds `PlayerLeft`,
+transfers host authority through the game core, and ends a race if the departed Player
+was its final unfinished racer. Expiry of the final Membership deletes the Room
+snapshot so the code is absent and may be claimed again. In the lobby, a host kick
+commits Player, Membership, join-attempt, and deadline removal before the target
+receives its terminal signal; kicked and invalid clients delete their browser
+credential, while connection-replaced and policy-closed clients retain it.
+
+A Room has eight occupied-or-pending Membership slots. A new join reserves a slot
+transactionally before returning its credential, while a newer-generation retry of the
+same pending attempt remains legal at capacity. Each WebSocket frame is capped at 4,096
+raw UTF-8 bytes before parsing, for both text and binary input. Oversized or rate-limited
+frames receive a structured error and policy close without revoking the Membership;
+the close then follows the ordinary away/grace lifecycle. A Player may commit 100 hops
+per round. Hop 101, including a goal hop, is a visible nonterminal
+`hop-limit-reached` error and leaves authoritative Room state unchanged. Snapshot v6
+persists and validates the Membership, quota-window, and hop-path bounds.
 
 Worker Round preparation is an explicit Room phase. Accepted Start persists the
 preparing Room, one generation token, the chosen difficulty/category, and one typed
@@ -123,7 +135,7 @@ Legality — what is never allowed:
 - Join request generations only increase, and every pending or promoted attempt owns a
   distinct Player ID. The Room rejects stale rotations; snapshot validation rejects aliases.
 - Worker future transitions have one owner: the persisted typed Deadline schedule and
-  Durable Object alarm. Snapshot v5 allows at most one phase transition plus concurrent
+  Durable Object alarm. Snapshot v6 allows at most one phase transition plus concurrent
   Membership grace deadlines. The alarm targets the deterministic earliest item,
   processes one due item, and re-arms from persisted state. Worker Room code never uses
   JavaScript timers, and an async preparation result must still own the persisted

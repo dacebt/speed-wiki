@@ -33,7 +33,10 @@ describe('authoritative Worker gameplay', () => {
     expect(await replayError).toEqual(
       expect.objectContaining({ type: 'room/error', code: 'wrong-phase' }),
     );
-    expect(await storedRuntime(room.code)).toEqual(beforeReplay);
+    const rejectedReplay = await storedRuntime(room.code);
+    expect(rejectedReplay.snapshot.room).toEqual(beforeReplay.snapshot.room);
+    expect(rejectedReplay.snapshot.deadlines).toEqual(beforeReplay.snapshot.deadlines);
+    expect(rejectedReplay.alarm).toBe(beforeReplay.alarm);
 
     room.now.mockReturnValue(room.startedAt + 1_000);
     const ordinaryHop = waitForPhase(room.hostSocket, 'racing');
@@ -89,7 +92,13 @@ describe('authoritative Worker gameplay', () => {
     expect(await guestReplayError).toEqual(
       expect.objectContaining({ type: 'room/error', code: 'not-host' }),
     );
-    expect(await storedRuntime(room.code)).toEqual(results);
+    const rejectedGuestReplay = await storedRuntime(room.code);
+    expect(rejectedGuestReplay.snapshot.room).toEqual(results.snapshot.room);
+    expect(rejectedGuestReplay.snapshot.deadlines).toEqual(results.snapshot.deadlines);
+    expect(rejectedGuestReplay.alarm).toBe(results.alarm);
+    expect(rejectedGuestReplay.snapshot.memberships[room.guest.playerId]!.messageWindow.count).toBe(
+      results.snapshot.memberships[room.guest.playerId]!.messageWindow.count + 1,
+    );
 
     const hostLobby = waitForPhase(room.hostSocket, 'lobby');
     const guestLobby = waitForPhase(room.guestSocket, 'lobby');

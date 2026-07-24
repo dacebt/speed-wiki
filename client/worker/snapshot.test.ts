@@ -1,4 +1,9 @@
 import { decide, initialRoom, reduce, type CoreRoom } from '@wikispeedrun/game';
+import {
+  MEMBERSHIP_MESSAGE_RATE_LIMIT,
+  PLAYER_ROUND_HOP_LIMIT,
+  ROOM_MEMBERSHIP_LIMIT,
+} from '@wikispeedrun/shared';
 import { describe, expect, test } from 'vitest';
 import { ROOM_SNAPSHOT_VERSION, parseRoomSnapshot, type RoomSnapshot } from './snapshot.js';
 
@@ -9,8 +14,15 @@ const OTHER_ATTEMPT_ID = '2297ac68-da58-4cad-94ae-e5f863beab60';
 const PREPARATION_TOKEN = '018f1f21-9fd8-4c8a-a639-0f6d40ceefab';
 const CONNECTION_ID = '318f1f21-9fd8-4c8a-a639-0f6d40ceefab';
 const DIGEST = 'a'.repeat(64);
+const MESSAGE_WINDOW = { startedAt: 1, count: 1 };
 
 describe('durable Room snapshot validation', () => {
+  test('advances persisted state exactly once to schema v6', () => {
+    expect(ROOM_SNAPSHOT_VERSION).toBe(6);
+    const prior = { ...validSnapshot(), schemaVersion: 5 };
+    expect(() => parseRoomSnapshot(prior)).toThrow('Invalid Room snapshot version.');
+  });
+
   test.each([
     [
       'non-finite player score',
@@ -37,6 +49,7 @@ describe('durable Room snapshot validation', () => {
         snapshot.memberships[OTHER_ID] = {
           credentialDigest: DIGEST,
           activeConnectionId: OTHER_ATTEMPT_ID,
+          messageWindow: { ...MESSAGE_WINDOW },
         };
       },
     ],
@@ -78,6 +91,71 @@ describe('durable Room snapshot validation', () => {
 
   test('accepts the persisted one-host lobby', () => {
     expect(parseRoomSnapshot(validSnapshot())).toEqual(validSnapshot());
+  });
+
+  test('accepts eight occupied slots and rejects a ninth', () => {
+    const atCapacity = validSnapshot();
+    addVisiblePlayers(atCapacity, ROOM_MEMBERSHIP_LIMIT - 1);
+    expect(parseRoomSnapshot(atCapacity)).toEqual(atCapacity);
+
+    addVisiblePlayers(atCapacity, 1, ROOM_MEMBERSHIP_LIMIT);
+    expect(() => parseRoomSnapshot(atCapacity)).toThrow();
+  });
+
+  test('counts pending reservations toward the persisted slot bound', () => {
+    const snapshot = validSnapshot();
+    addPendingAttempts(snapshot, ROOM_MEMBERSHIP_LIMIT - 1);
+    expect(parseRoomSnapshot(snapshot)).toEqual(snapshot);
+
+    addPendingAttempts(snapshot, 1, ROOM_MEMBERSHIP_LIMIT);
+    expect(() => parseRoomSnapshot(snapshot)).toThrow();
+  });
+
+  test.each([
+    [
+      'a message count above the public limit',
+      (snapshot: RoomSnapshot) => {
+        snapshot.memberships[HOST_ID]!.messageWindow.count =
+          MEMBERSHIP_MESSAGE_RATE_LIMIT.messages + 1;
+      },
+    ],
+    [
+      'an active zero-count message window',
+      (snapshot: RoomSnapshot) => {
+        snapshot.memberships[HOST_ID]!.messageWindow = { startedAt: 1, count: 0 };
+      },
+    ],
+    [
+      'a counted message window without a start',
+      (snapshot: RoomSnapshot) => {
+        snapshot.memberships[HOST_ID]!.messageWindow = { startedAt: 0, count: 1 };
+      },
+    ],
+    [
+      'a negative message window start',
+      (snapshot: RoomSnapshot) => {
+        snapshot.memberships[HOST_ID]!.messageWindow.startedAt = -1;
+      },
+    ],
+    [
+      'an extra message window field',
+      (snapshot: RoomSnapshot) => {
+        Object.assign(snapshot.memberships[HOST_ID]!.messageWindow, { extra: true });
+      },
+    ],
+  ])('rejects %s', (_label, mutate) => {
+    const snapshot = validSnapshot();
+    mutate(snapshot);
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('Invalid Room snapshot Memberships.');
+  });
+
+  test('rejects a persisted Player path beyond the round hop bound', () => {
+    const snapshot = racingSnapshot();
+    snapshot.room.players[0]!.path = Array.from(
+      { length: PLAYER_ROUND_HOP_LIMIT + 2 },
+      (_, index) => `Article ${index}`,
+    );
+    expect(() => parseRoomSnapshot(snapshot)).toThrow();
   });
 
   test('accepts an away Membership only with one matching grace deadline', () => {
@@ -370,6 +448,7 @@ describe('durable Room snapshot validation', () => {
         snapshot.memberships.notAPlayerId = {
           credentialDigest: DIGEST,
           activeConnectionId: CONNECTION_ID,
+          messageWindow: { ...MESSAGE_WINDOW },
         };
       },
     ],
@@ -482,12 +561,53 @@ function validSnapshot(): RoomSnapshot {
     schemaVersion: ROOM_SNAPSHOT_VERSION,
     room,
     memberships: {
-      [HOST_ID]: { credentialDigest: DIGEST, activeConnectionId: CONNECTION_ID },
+      [HOST_ID]: {
+        credentialDigest: DIGEST,
+        activeConnectionId: CONNECTION_ID,
+        messageWindow: { ...MESSAGE_WINDOW },
+      },
     },
     joinAttempts: {},
     roundPreparation: null,
     deadlines: [],
   };
+}
+
+function addVisiblePlayers(snapshot: RoomSnapshot, count: number, offset = 1): void {
+  for (let index = offset; index < offset + count; index += 1) {
+    const playerId = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    const decision = decide(snapshot.room, {
+      kind: 'client',
+      playerId,
+      at: index,
+      intent: {
+        type: 'room/join',
+        code: snapshot.room.code,
+        playerName: `Player ${index}`,
+        playerId,
+      },
+    });
+    if (!decision.ok) throw new Error(decision.message);
+    snapshot.room = decision.events.reduce(reduce, snapshot.room);
+    snapshot.memberships[playerId] = {
+      credentialDigest: DIGEST,
+      activeConnectionId: playerId,
+      messageWindow: { ...MESSAGE_WINDOW },
+    };
+  }
+}
+
+function addPendingAttempts(snapshot: RoomSnapshot, count: number, offset = 1): void {
+  for (let index = offset; index < offset + count; index += 1) {
+    const suffix = String(index).padStart(12, '0');
+    snapshot.joinAttempts[`10000000-0000-4000-8000-${suffix}`] = {
+      state: 'pending',
+      playerId: `20000000-0000-4000-8000-${suffix}`,
+      playerName: `Pending ${index}`,
+      credentialDigest: DIGEST,
+      generation: 0,
+    };
+  }
 }
 
 function awaySnapshot(): RoomSnapshot {
@@ -518,6 +638,7 @@ function twoPlayerSnapshot(): RoomSnapshot {
   snapshot.memberships[OTHER_ID] = {
     credentialDigest: DIGEST,
     activeConnectionId: OTHER_ATTEMPT_ID,
+    messageWindow: { ...MESSAGE_WINDOW },
   };
   return snapshot;
 }

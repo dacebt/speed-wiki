@@ -34,6 +34,25 @@ describe('transport disconnect state', () => {
     expect(next.notice).toBeNull();
   });
 
+  test('a hop-limit error stays visible without removing the Player from the Room', () => {
+    const next = reduceAppState(inRoom(), {
+      type: 'server/message',
+      message: {
+        type: 'room/error',
+        code: 'hop-limit-reached',
+        message: 'A Player may make at most 100 hops per round.',
+      },
+      receivedAt: 1,
+    });
+
+    expect(next.room?.code).toBe('ABCD');
+    expect(next.you).toBe(PLAYER_ID);
+    expect(next.notice).toEqual({
+      code: 'hop-limit-reached',
+      message: 'A Player may make at most 100 hops per round.',
+    });
+  });
+
   test('replacement and retry exhaustion preserve the shared last-Room pointer', () => {
     for (const code of ['connection-replaced', 'room-unavailable'] as const) {
       const state = reduceAppState(inRoom(), {
@@ -53,6 +72,16 @@ describe('transport disconnect state', () => {
           notice: { code, message: 'Membership ended.' },
         }),
       ).toBe(true);
+    }
+  });
+
+  test('frame and rate policy disconnects preserve the shared last-Room pointer', () => {
+    for (const code of ['message-too-large', 'rate-limited'] as const) {
+      const state = reduceAppState(inRoom(), {
+        type: 'socket/disconnected',
+        disconnect: { type: 'terminal', code, message: 'Connection ended.' },
+      });
+      expect(shouldClearLastRoom(state)).toBe(false);
     }
   });
 });

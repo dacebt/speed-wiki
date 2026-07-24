@@ -1,3 +1,4 @@
+import { PLAYER_ROUND_HOP_LIMIT } from '@wikispeedrun/shared';
 import { describe, expect, test } from 'vitest';
 import { decide } from './decide.js';
 import { reduce } from './reduce.js';
@@ -52,6 +53,45 @@ describe('round end', () => {
     const room = startRacing(seedPlayers('a', 'b'), { goal: 'Goal', at: 0 });
     const afterA = apply(room, client('a', { type: 'race/giveUp' }, 1000)).room;
     expect(afterA.phase).toBe('racing');
+  });
+});
+
+describe('per-Player round hop boundary', () => {
+  test('accepts hop 100 and rejects hop 101 without changing state', () => {
+    let room = startRacing(seedPlayers('solo'), { start: 'Start', goal: 'Goal', at: 0 });
+    for (let hop = 1; hop < PLAYER_ROUND_HOP_LIMIT; hop += 1) {
+      room = apply(room, client('solo', { type: 'race/hop', article: `Article ${hop}` }, hop)).room;
+    }
+
+    const hundredth = decide(
+      room,
+      client('solo', { type: 'race/hop', article: 'Article 100' }, 100),
+    );
+    expect(hundredth).toMatchObject({ ok: true });
+    if (!hundredth.ok) throw new Error(hundredth.message);
+    room = hundredth.events.reduce(reduce, room);
+    expect(room.players[0]!.path).toHaveLength(PLAYER_ROUND_HOP_LIMIT + 1);
+
+    const beforeRejected = JSON.stringify(room);
+    const hundredAndFirst = decide(
+      room,
+      client('solo', { type: 'race/hop', article: 'Article 101' }, 101),
+    );
+    expect(hundredAndFirst).toMatchObject({ ok: false, code: 'hop-limit-reached' });
+    expect(JSON.stringify(room)).toBe(beforeRejected);
+  });
+
+  test('does not permit a goal hop after the hop budget is exhausted', () => {
+    let room = startRacing(seedPlayers('solo'), { start: 'Start', goal: 'Goal', at: 0 });
+    for (let hop = 1; hop <= PLAYER_ROUND_HOP_LIMIT; hop += 1) {
+      room = apply(room, client('solo', { type: 'race/hop', article: `Article ${hop}` }, hop)).room;
+    }
+
+    const beforeGoal = JSON.stringify(room);
+    const goal = decide(room, client('solo', { type: 'race/hop', article: 'Goal' }, 101));
+    expect(goal).toMatchObject({ ok: false, code: 'hop-limit-reached' });
+    expect(JSON.stringify(room)).toBe(beforeGoal);
+    expect(room.phase).toBe('racing');
   });
 });
 

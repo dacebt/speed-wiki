@@ -5,6 +5,7 @@ import type {
   RoomConnectMessage,
   ServerMessage,
 } from '@wikispeedrun/shared';
+import { WEBSOCKET_MESSAGE_BYTE_LIMIT } from '@wikispeedrun/shared';
 import type { RoomSnapshot } from './snapshot.js';
 
 type PendingAttachment = { state: 'pending' };
@@ -61,6 +62,11 @@ type SupportedIntentType =
   'game/start' | 'race/hop' | 'race/giveUp' | 'game/playAgain' | 'room/kick';
 export type WorkerPlayerIntent = Extract<ClientIntent, { type: SupportedIntentType }>;
 export type AuthenticatedRoomMessage = WorkerPlayerIntent | 'unsupported' | 'invalid';
+
+export function isMessageWithinByteLimit(raw: string | ArrayBuffer): boolean {
+  const bytes = typeof raw === 'string' ? new TextEncoder().encode(raw).byteLength : raw.byteLength;
+  return bytes <= WEBSOCKET_MESSAGE_BYTE_LIMIT;
+}
 
 export function parseAuthenticatedMessage(raw: string | ArrayBuffer): AuthenticatedRoomMessage {
   if (typeof raw !== 'string') return 'invalid';

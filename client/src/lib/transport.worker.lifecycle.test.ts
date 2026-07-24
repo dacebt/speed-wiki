@@ -315,6 +315,120 @@ describe('Worker Connection ownership', () => {
     cleanup();
   });
 
+  test.each([
+    [1008, 'rate-limited', 'This Room Membership sent too many messages. Try again shortly.'],
+    [1009, 'message-too-large', 'Room messages may be at most 4,096 UTF-8 bytes.'],
+  ] as const)(
+    'close-code-only policy failure %s terminates as %s and retains the Membership',
+    async (closeCode, code, message) => {
+      stubBrowser('');
+      const transport = await import('./transport.worker.js');
+      const onDisconnect = vi.fn();
+      const cleanup = transport.subscribe({
+        onMessage: vi.fn(),
+        onConnect: vi.fn(),
+        onDisconnect,
+      });
+      await Promise.resolve();
+      sockets[0]!.open();
+      sockets[0]!.message({
+        type: 'room/sync',
+        room: workerTransportLobby(),
+        you: PLAYER_ID,
+        at: 1,
+      });
+
+      sockets[0]!.close(closeCode, 'Structured error frame was lost.');
+      await Promise.resolve();
+
+      expect(onDisconnect).toHaveBeenLastCalledWith({
+        type: 'terminal',
+        code,
+        message,
+      });
+      expect(sockets).toHaveLength(1);
+      expect(localStorage.removeItem).not.toHaveBeenCalled();
+      expect(localStorage.getItem('wikispeedrun.lastRoom')).toBe('ABCD');
+      expect(localStorage.getItem('wikispeedrun.room.ABCD.membership')).toBe(
+        JSON.stringify({
+          playerId: PLAYER_ID,
+          rejoinCredential: CREDENTIAL,
+        }),
+      );
+      cleanup();
+    },
+  );
+
+  test('a hop-limit error remains a visible, nonterminal Room message', async () => {
+    stubBrowser('');
+    const transport = await import('./transport.worker.js');
+    const onMessage = vi.fn();
+    const onDisconnect = vi.fn();
+    const cleanup = transport.subscribe({
+      onMessage,
+      onConnect: vi.fn(),
+      onDisconnect,
+    });
+    await Promise.resolve();
+    sockets[0]!.open();
+    sockets[0]!.message({
+      type: 'room/sync',
+      room: workerTransportLobby(),
+      you: PLAYER_ID,
+      at: 1,
+    });
+    const error = {
+      type: 'room/error',
+      code: 'hop-limit-reached',
+      message: 'A Player may make at most 100 hops per round.',
+    } as const;
+    sockets[0]!.message(error);
+    await Promise.resolve();
+
+    expect(onMessage).toHaveBeenLastCalledWith(error);
+    expect(onDisconnect).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'terminal' }));
+    expect(sockets[0]!.readyState).toBe(LifecycleSocket.OPEN);
+    expect(localStorage.removeItem).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  test.each(['message-too-large', 'rate-limited'] as const)(
+    'a %s policy error terminates the Connection but retains Membership storage',
+    async (code) => {
+      stubBrowser('');
+      const transport = await import('./transport.worker.js');
+      const onDisconnect = vi.fn();
+      const cleanup = transport.subscribe({
+        onMessage: vi.fn(),
+        onConnect: vi.fn(),
+        onDisconnect,
+      });
+      await Promise.resolve();
+      sockets[0]!.open();
+      sockets[0]!.message({
+        type: 'room/sync',
+        room: workerTransportLobby(),
+        you: PLAYER_ID,
+        at: 1,
+      });
+      sockets[0]!.message({
+        type: 'room/error',
+        code,
+        message: 'Connection policy rejected the message.',
+      });
+      await Promise.resolve();
+
+      expect(onDisconnect).toHaveBeenLastCalledWith({
+        type: 'terminal',
+        code,
+        message: 'Connection policy rejected the message.',
+      });
+      expect(localStorage.removeItem).not.toHaveBeenCalled();
+      expect(sockets).toHaveLength(1);
+      cleanup();
+    },
+  );
+
   test('a kick deletes the stored Membership before publishing the terminal signal', async () => {
     stubBrowser('');
     const transport = await import('./transport.worker.js');

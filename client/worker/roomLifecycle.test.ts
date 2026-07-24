@@ -231,7 +231,13 @@ describe('durable Round preparation and countdown', () => {
       code: 'not-host',
       message: 'Only the host may start the race.',
     });
-    expect(await storedRuntime(host.roomCode)).toEqual(before);
+    const after = await storedRuntime(host.roomCode);
+    expect(after.snapshot.room).toEqual(before.snapshot.room);
+    expect(after.snapshot.deadlines).toEqual(before.snapshot.deadlines);
+    expect(after.alarm).toBe(before.alarm);
+    expect(after.snapshot.memberships[guest.playerId]!.messageWindow.count).toBe(
+      before.snapshot.memberships[guest.playerId]!.messageWindow.count + 1,
+    );
     guestSocket.close(1000, 'Test complete.');
     hostSocket.close(1000, 'Test complete.');
   });

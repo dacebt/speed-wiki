@@ -1,11 +1,13 @@
 import { decide, initialRoom, reduce } from '@wikispeedrun/game';
 import {
   MAX_NAME_LENGTH,
+  ROOM_MEMBERSHIP_LIMIT,
   normalizeRoomCode,
   type CreateRoomResponse,
   type ErrorCode,
   type JoinRoomResponse,
 } from '@wikispeedrun/shared';
+import { advanceMessageWindow, initialMessageWindow } from './roomRateLimit.js';
 import {
   ROOM_SNAPSHOT_VERSION,
   ROOM_STORAGE_KEY,
@@ -21,7 +23,7 @@ export type JoinRoomClaim =
   ({ ok: true } & JoinRoomResponse) | { ok: false; code: ErrorCode; message: string };
 
 export type AuthenticationResult =
-  | { ok: false }
+  | { ok: false; reason: 'invalid-membership' | 'rate-limited' }
   | {
       ok: true;
       snapshot: RoomSnapshot;
@@ -65,7 +67,13 @@ export async function createRoomClaim(
   const snapshot: RoomSnapshot = {
     schemaVersion: ROOM_SNAPSHOT_VERSION,
     room: away.events.reduce(reduce, joined),
-    memberships: { [playerId]: { credentialDigest, activeConnectionId: null } },
+    memberships: {
+      [playerId]: {
+        credentialDigest,
+        activeConnectionId: null,
+        messageWindow: initialMessageWindow(),
+      },
+    },
     joinAttempts: {},
     roundPreparation: null,
     deadlines: [{ kind: 'membership-grace', playerId, connectionId: null, at: graceAt }],
@@ -114,6 +122,14 @@ export async function joinRoomClaim(
       if (existing?.state === 'pending' && generation <= existing.generation) {
         return reject('invalid-request', 'This join attempt generation is stale.');
       }
+      if (!existing) {
+        const pendingCount = Object.values(snapshot.joinAttempts).filter(
+          (attempt) => attempt.state === 'pending',
+        ).length;
+        if (Object.keys(snapshot.memberships).length + pendingCount >= ROOM_MEMBERSHIP_LIMIT) {
+          return reject('room-full', 'The Room is full.');
+        }
+      }
       const playerId = existing?.playerId ?? crypto.randomUUID();
       const next: RoomSnapshot = {
         ...snapshot,
@@ -157,7 +173,7 @@ export async function authenticateMembership(
   const suppliedDigest = await digestCredential(rejoinCredential);
   return state.storage.transaction(async (transaction): Promise<AuthenticationResult> => {
     const stored = await transaction.get(ROOM_STORAGE_KEY);
-    if (stored === undefined) return { ok: false };
+    if (stored === undefined) return { ok: false, reason: 'invalid-membership' };
     const snapshot = parseRoomSnapshot(stored);
     const membership = snapshot.memberships[playerId];
     if (membership?.credentialDigest === suppliedDigest) {
@@ -166,8 +182,10 @@ export async function authenticateMembership(
         const grace = snapshot.deadlines.find(
           (deadline) => deadline.kind === 'membership-grace' && deadline.playerId === playerId,
         );
-        if (!grace || at >= grace.at) return { ok: false };
+        if (!grace || at >= grace.at) return { ok: false, reason: 'invalid-membership' };
       }
+      const messageWindow = advanceMessageWindow(membership.messageWindow, at);
+      if (!messageWindow) return { ok: false, reason: 'rate-limited' };
       const decision = decide(snapshot.room, {
         kind: 'client',
         playerId,
@@ -179,13 +197,13 @@ export async function authenticateMembership(
           playerId,
         },
       });
-      if (!decision.ok) return { ok: false };
+      if (!decision.ok) return { ok: false, reason: 'invalid-membership' };
       const next: RoomSnapshot = {
         ...snapshot,
         room: decision.events.reduce(reduce, snapshot.room),
         memberships: {
           ...snapshot.memberships,
-          [playerId]: { ...membership, activeConnectionId: connectionId },
+          [playerId]: { ...membership, activeConnectionId: connectionId, messageWindow },
         },
         deadlines: removeMembershipGrace(snapshot.deadlines, playerId),
       };
@@ -206,20 +224,21 @@ export async function authenticateMembership(
         attempt.playerId === playerId &&
         attempt.credentialDigest === suppliedDigest,
     );
-    if (!pendingEntry) return { ok: false };
+    if (!pendingEntry) return { ok: false, reason: 'invalid-membership' };
     if (
       snapshot.deadlines.some(
         (deadline) => deadline.kind === 'membership-grace' && deadline.connectionId === null,
       )
     ) {
-      return { ok: false };
+      return { ok: false, reason: 'invalid-membership' };
     }
     const [attemptId, pending] = pendingEntry;
-    if (pending.state !== 'pending') return { ok: false };
+    if (pending.state !== 'pending') return { ok: false, reason: 'invalid-membership' };
+    const at = Date.now();
     const decision = decide(snapshot.room, {
       kind: 'client',
       playerId,
-      at: Date.now(),
+      at,
       intent: {
         type: 'room/join',
         code: snapshot.room.code,
@@ -227,7 +246,7 @@ export async function authenticateMembership(
         playerId,
       },
     });
-    if (!decision.ok) return { ok: false };
+    if (!decision.ok) return { ok: false, reason: 'invalid-membership' };
     const next: RoomSnapshot = {
       ...snapshot,
       room: decision.events.reduce(reduce, snapshot.room),
@@ -236,6 +255,7 @@ export async function authenticateMembership(
         [playerId]: {
           credentialDigest: pending.credentialDigest,
           activeConnectionId: connectionId,
+          messageWindow: { startedAt: at, count: 1 },
         },
       },
       joinAttempts: {

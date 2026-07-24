@@ -4,6 +4,11 @@ import type {
   JoinRoomResponse,
   ServerMessage,
 } from '@wikispeedrun/shared';
+import {
+  MEMBERSHIP_MESSAGE_RATE_LIMIT,
+  ROOM_MEMBERSHIP_LIMIT,
+  WEBSOCKET_MESSAGE_BYTE_LIMIT,
+} from '@wikispeedrun/shared';
 import { env } from 'cloudflare:workers';
 import { evictDurableObject, reset, runInDurableObject, SELF } from 'cloudflare:test';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -36,6 +41,7 @@ describe('Cloudflare Room creation boundary', () => {
     expect(snapshot.memberships[created.playerId]).toEqual({
       credentialDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
       activeConnectionId: null,
+      messageWindow: { startedAt: 0, count: 0 },
     });
     expect(snapshot.deadlines).toEqual([
       {
@@ -267,7 +273,11 @@ describe('Cloudflare Room creation boundary', () => {
       host.playerId,
       guest.playerId,
     ]);
-    expect(snapshot.memberships[guest.playerId]?.credentialDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(snapshot.memberships[guest.playerId]).toEqual({
+      credentialDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+      activeConnectionId: expect.any(String),
+      messageWindow: { startedAt: expect.any(Number), count: 1 },
+    });
     expect(JSON.stringify(stored)).not.toContain(guest.rejoinCredential);
     expect(snapshot.joinAttempts[JOIN_ATTEMPT_ID]).toEqual({
       state: 'promoted',
@@ -482,6 +492,286 @@ describe('Cloudflare Room creation boundary', () => {
     expect(await absent.json<ApiErrorResponse>()).toEqual({
       error: { code: 'room-not-found', message: 'No room found with that code.' },
     });
+  });
+
+  test('counts pending reservations toward eight slots, rejects the ninth, and permits an at-capacity retry', async () => {
+    const host = await createRoom('Host');
+    const path = `https://example.test/api/rooms/${host.roomCode}/memberships`;
+    const attempts = [
+      '00000000-0000-4000-8000-000000000001',
+      '00000000-0000-4000-8000-000000000002',
+      '00000000-0000-4000-8000-000000000003',
+      '00000000-0000-4000-8000-000000000004',
+      '00000000-0000-4000-8000-000000000005',
+      '00000000-0000-4000-8000-000000000006',
+      '00000000-0000-4000-8000-000000000007',
+      '00000000-0000-4000-8000-000000000008',
+    ];
+    let eighthSlot: JoinRoomResponse | null = null;
+    for (const [index, attemptId] of attempts.slice(0, ROOM_MEMBERSHIP_LIMIT - 1).entries()) {
+      const response = await SELF.fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playerName: `Guest ${index + 1}`,
+          attemptId,
+          generation: 0,
+        }),
+      });
+      expect(response.status).toBe(201);
+      eighthSlot = await response.json<JoinRoomResponse>();
+    }
+
+    const stub = env.ROOMS.getByName(host.roomCode);
+    const atCapacity = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(Object.keys(atCapacity.memberships)).toHaveLength(1);
+    expect(
+      Object.values(atCapacity.joinAttempts).filter((attempt) => attempt.state === 'pending'),
+    ).toHaveLength(ROOM_MEMBERSHIP_LIMIT - 1);
+
+    const rejected = await SELF.fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playerName: 'Ninth Player',
+        attemptId: attempts.at(-1),
+        generation: 0,
+      }),
+    });
+    expect(rejected.status).toBe(409);
+    expect(await rejected.json<ApiErrorResponse>()).toEqual({
+      error: { code: 'room-full', message: 'The Room is full.' },
+    });
+    expect(
+      parseRoomSnapshot(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      ),
+    ).toEqual(atCapacity);
+
+    const retry = await SELF.fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playerName: `Guest ${ROOM_MEMBERSHIP_LIMIT - 1}`,
+        attemptId: attempts[ROOM_MEMBERSHIP_LIMIT - 2],
+        generation: 1,
+      }),
+    });
+    expect(retry.status).toBe(201);
+    const retried = await retry.json<JoinRoomResponse>();
+    expect(retried.playerId).toBe(eighthSlot!.playerId);
+    expect(retried.rejoinCredential).not.toBe(eighthSlot!.rejoinCredential);
+    const afterRetry = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(Object.keys(afterRetry.memberships)).toHaveLength(1);
+    expect(
+      Object.values(afterRetry.joinAttempts).filter((attempt) => attempt.state === 'pending'),
+    ).toHaveLength(ROOM_MEMBERSHIP_LIMIT - 1);
+  });
+
+  test.each(['utf8', 'binary'] as const)(
+    'enforces the 4,096-byte frame boundary before parsing for %s frames',
+    async (kind) => {
+      const host = await createRoom('Host');
+      const socket = await connectRoomSocket(host);
+      const stub = env.ROOMS.getByName(host.roomCode);
+      const accepted =
+        kind === 'utf8'
+          ? 'é'.repeat(WEBSOCKET_MESSAGE_BYTE_LIMIT / 2)
+          : new Uint8Array(WEBSOCKET_MESSAGE_BYTE_LIMIT).buffer;
+      const oversized =
+        kind === 'utf8'
+          ? `${'é'.repeat(WEBSOCKET_MESSAGE_BYTE_LIMIT / 2)}x`
+          : new Uint8Array(WEBSOCKET_MESSAGE_BYTE_LIMIT + 1).buffer;
+
+      const invalid = waitForMessage(socket);
+      socket.send(accepted);
+      await expect(invalid).resolves.toEqual(
+        expect.objectContaining({ type: 'room/error', code: 'invalid-request' }),
+      );
+      const beforeOversized = parseRoomSnapshot(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      );
+      expect(beforeOversized.memberships[host.playerId]!.messageWindow.count).toBe(2);
+
+      const error = waitForMessage(socket);
+      const closed = waitForClose(socket);
+      socket.send(oversized);
+      await expect(error).resolves.toEqual({
+        type: 'room/error',
+        code: 'message-too-large',
+        message: 'Room messages may be at most 4,096 UTF-8 bytes.',
+      });
+      expect((await closed).code).toBe(1009);
+      await expect
+        .poll(async () => {
+          const stored = await runInDurableObject(stub, async (_instance, state) =>
+            state.storage.get(ROOM_STORAGE_KEY),
+          );
+          return parseRoomSnapshot(stored).room.players[0]?.away;
+        })
+        .toBe(true);
+      const afterOversized = parseRoomSnapshot(
+        await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        ),
+      );
+      expect(afterOversized.room).toEqual({
+        ...beforeOversized.room,
+        players: [{ ...beforeOversized.room.players[0]!, away: true }],
+      });
+      expect(afterOversized.memberships[host.playerId]!.messageWindow).toEqual(
+        beforeOversized.memberships[host.playerId]!.messageWindow,
+      );
+    },
+  );
+
+  test('counts authentication and every authenticated frame, then closes the 21st without applying it', async () => {
+    const base = 10_000;
+    vi.spyOn(Date, 'now').mockReturnValue(base);
+    const host = await createRoom('Host');
+    const socket = await connectRoomSocket(host);
+    for (let message = 2; message <= MEMBERSHIP_MESSAGE_RATE_LIMIT.messages; message += 1) {
+      const error = waitForMessage(socket);
+      socket.send('{}');
+      await expect(error).resolves.toEqual(
+        expect.objectContaining({ type: 'room/error', code: 'invalid-request' }),
+      );
+    }
+
+    const rejected = waitForMessage(socket);
+    const closed = waitForClose(socket);
+    socket.send(JSON.stringify({ type: 'game/start' }));
+    await expect(rejected).resolves.toEqual({
+      type: 'room/error',
+      code: 'rate-limited',
+      message: 'This Room Membership sent too many messages. Try again shortly.',
+    });
+    expect((await closed).code).toBe(1008);
+
+    const stub = env.ROOMS.getByName(host.roomCode);
+    await expect
+      .poll(async () => {
+        const stored = await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.get(ROOM_STORAGE_KEY),
+        );
+        return parseRoomSnapshot(stored).room.players[0]?.away;
+      })
+      .toBe(true);
+    const after = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(after.room.phase).toBe('lobby');
+    expect(after.memberships[host.playerId]!.messageWindow).toEqual({
+      startedAt: base,
+      count: MEMBERSHIP_MESSAGE_RATE_LIMIT.messages,
+    });
+  });
+
+  test('opens a new fixed window exactly at 10,000ms', async () => {
+    const base = 20_000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    const host = await createRoom('Host');
+    const socket = await connectRoomSocket(host);
+    for (let message = 2; message <= MEMBERSHIP_MESSAGE_RATE_LIMIT.messages; message += 1) {
+      const error = waitForMessage(socket);
+      socket.send('{}');
+      await error;
+    }
+
+    clock.mockReturnValue(base + MEMBERSHIP_MESSAGE_RATE_LIMIT.windowMs);
+    const accepted = waitForMessage(socket);
+    socket.send('{}');
+    await expect(accepted).resolves.toEqual(
+      expect.objectContaining({ type: 'room/error', code: 'invalid-request' }),
+    );
+    const snapshot = parseRoomSnapshot(
+      await runInDurableObject(env.ROOMS.getByName(host.roomCode), async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(snapshot.memberships[host.playerId]!.messageWindow).toEqual({
+      startedAt: base + MEMBERSHIP_MESSAGE_RATE_LIMIT.windowMs,
+      count: 1,
+    });
+    socket.close(1000, 'Test complete.');
+  });
+
+  test('persists the Membership quota across connection replacement', async () => {
+    const base = 30_000;
+    vi.spyOn(Date, 'now').mockReturnValue(base);
+    const host = await createRoom('Host');
+    const first = await connectRoomSocket(host);
+    for (let message = 2; message < MEMBERSHIP_MESSAGE_RATE_LIMIT.messages; message += 1) {
+      const error = waitForMessage(first);
+      first.send('{}');
+      await error;
+    }
+
+    const replacement = await openRoomSocket(host.roomCode);
+    const oldError = waitForMessage(first);
+    const replacementSync = waitForMessage(replacement);
+    replacement.send(connectFrame(host));
+    await Promise.all([oldError, replacementSync]);
+    const rejected = waitForMessage(replacement);
+    const closed = waitForClose(replacement);
+    replacement.send('{}');
+    await expect(rejected).resolves.toEqual(
+      expect.objectContaining({ type: 'room/error', code: 'rate-limited' }),
+    );
+    expect((await closed).code).toBe(1008);
+    const snapshot = parseRoomSnapshot(
+      await runInDurableObject(env.ROOMS.getByName(host.roomCode), async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(snapshot.memberships[host.playerId]!.messageWindow.count).toBe(
+      MEMBERSHIP_MESSAGE_RATE_LIMIT.messages,
+    );
+  });
+
+  test('persists the Membership quota across Durable Object eviction', async () => {
+    const base = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    const host = await createRoom('Host');
+    const first = await connectRoomSocket(host);
+    for (let message = 2; message <= MEMBERSHIP_MESSAGE_RATE_LIMIT.messages; message += 1) {
+      const error = waitForMessage(first);
+      first.send('{}');
+      await error;
+    }
+    const stub = env.ROOMS.getByName(host.roomCode);
+    clock.mockRestore();
+    await evictDurableObject(stub);
+
+    const rejected = waitForMessage(first);
+    const closed = waitForClose(first);
+    first.send('{}');
+    await expect(rejected).resolves.toEqual(
+      expect.objectContaining({ type: 'room/error', code: 'rate-limited' }),
+    );
+    expect((await closed).code).toBe(1008);
+    const snapshot = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
+      ),
+    );
+    expect(snapshot.memberships[host.playerId]!.messageWindow.count).toBe(
+      MEMBERSHIP_MESSAGE_RATE_LIMIT.messages,
+    );
   });
 
   test('a public Player ID without its credential cannot take over a Membership', async () => {
@@ -1075,13 +1365,17 @@ describe('Cloudflare Room creation boundary', () => {
     await expect(error).resolves.toEqual(
       expect.objectContaining({ type: 'room/error', code: 'not-host' }),
     );
-    expect(
-      parseRoomSnapshot(
-        await runInDurableObject(stub, async (_instance, state) =>
-          state.storage.get(ROOM_STORAGE_KEY),
-        ),
+    const after = parseRoomSnapshot(
+      await runInDurableObject(stub, async (_instance, state) =>
+        state.storage.get(ROOM_STORAGE_KEY),
       ),
-    ).toEqual(before);
+    );
+    expect(after.room).toEqual(before.room);
+    expect(after.deadlines).toEqual(before.deadlines);
+    expect(after.joinAttempts).toEqual(before.joinAttempts);
+    expect(after.memberships[guest.playerId]!.messageWindow.count).toBe(
+      before.memberships[guest.playerId]!.messageWindow.count + 1,
+    );
     guestSocket.close(1000, 'Test complete.');
     hostSocket.close(1000, 'Test complete.');
   });

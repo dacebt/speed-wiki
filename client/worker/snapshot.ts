@@ -4,6 +4,9 @@ import {
   CATEGORIES,
   DIFFICULTIES,
   MAX_NAME_LENGTH,
+  MEMBERSHIP_MESSAGE_RATE_LIMIT,
+  PLAYER_ROUND_HOP_LIMIT,
+  ROOM_MEMBERSHIP_LIMIT,
   ROOM_PHASES,
   isRoomSettingsInRange,
   isValidCosmetics,
@@ -14,12 +17,18 @@ import {
   type RoundView,
 } from '@wikispeedrun/shared';
 
-export const ROOM_SNAPSHOT_VERSION = 5;
+export const ROOM_SNAPSHOT_VERSION = 6;
 export const ROOM_STORAGE_KEY = 'room';
+
+export interface MembershipMessageWindow {
+  startedAt: number;
+  count: number;
+}
 
 interface Membership {
   credentialDigest: string;
   activeConnectionId: string | null;
+  messageWindow: MembershipMessageWindow;
 }
 
 type JoinAttempt =
@@ -220,6 +229,7 @@ function parseRoom(value: unknown): CoreRoom | null {
     typeof value.phase !== 'string' ||
     !(ROOM_PHASES as readonly string[]).includes(value.phase) ||
     !Array.isArray(value.players) ||
+    value.players.length > ROOM_MEMBERSHIP_LIMIT ||
     !isNullablePositiveInteger(value.countdownEndsAt) ||
     !isNonNegativeInteger(value.roundsPlayed) ||
     !isNonNegativeInteger(value.ranksAssigned)
@@ -232,6 +242,7 @@ function parseRoom(value: unknown): CoreRoom | null {
   if (
     normalizeRoomCode(value.code) !== value.code ||
     players.some((player) => player === null) ||
+    players.some((player) => player!.path.length > PLAYER_ROUND_HOP_LIMIT + 1) ||
     round === undefined ||
     settings === null
   ) {
@@ -257,18 +268,28 @@ function parseMemberships(value: unknown): Record<string, Membership> | null {
     if (
       !isUuid(playerId) ||
       !isRecord(membership) ||
-      !hasExactKeys(membership, ['credentialDigest', 'activeConnectionId']) ||
+      !hasExactKeys(membership, ['credentialDigest', 'activeConnectionId', 'messageWindow']) ||
       typeof membership.credentialDigest !== 'string' ||
       !/^[a-f0-9]{64}$/.test(membership.credentialDigest) ||
       (membership.activeConnectionId !== null &&
         (typeof membership.activeConnectionId !== 'string' ||
-          !isUuid(membership.activeConnectionId)))
+          !isUuid(membership.activeConnectionId))) ||
+      !isRecord(membership.messageWindow) ||
+      !hasExactKeys(membership.messageWindow, ['startedAt', 'count']) ||
+      !isNonNegativeInteger(membership.messageWindow.startedAt) ||
+      !isNonNegativeInteger(membership.messageWindow.count) ||
+      membership.messageWindow.count > MEMBERSHIP_MESSAGE_RATE_LIMIT.messages ||
+      (membership.messageWindow.count === 0) !== (membership.messageWindow.startedAt === 0)
     ) {
       return null;
     }
     memberships[playerId] = {
       credentialDigest: membership.credentialDigest,
       activeConnectionId: membership.activeConnectionId,
+      messageWindow: {
+        startedAt: membership.messageWindow.startedAt,
+        count: membership.messageWindow.count,
+      },
     };
   }
   return memberships;
@@ -497,6 +518,8 @@ export function parseRoomSnapshot(value: unknown): RoomSnapshot {
   if (!deadlines) throw new Error('Invalid Room snapshot Deadlines.');
   if (
     room.players.length === 0 ||
+    room.players.length > ROOM_MEMBERSHIP_LIMIT ||
+    Object.keys(memberships).length > ROOM_MEMBERSHIP_LIMIT ||
     room.players.some((player) => memberships[player.id] === undefined) ||
     Object.keys(memberships).length !== room.players.length
   ) {
@@ -515,6 +538,15 @@ export function parseRoomSnapshot(value: unknown): RoomSnapshot {
   const attemptedPlayerIds = Object.values(joinAttempts).map((attempt) => attempt.playerId);
   if (new Set(attemptedPlayerIds).size !== attemptedPlayerIds.length) {
     throw new Error('Invalid join attempt Player identity aliases.');
+  }
+  const pendingCount = Object.values(joinAttempts).filter(
+    (attempt) => attempt.state === 'pending',
+  ).length;
+  if (
+    Object.keys(joinAttempts).length > ROOM_MEMBERSHIP_LIMIT ||
+    Object.keys(memberships).length + pendingCount > ROOM_MEMBERSHIP_LIMIT
+  ) {
+    throw new Error('Invalid Room snapshot Membership capacity.');
   }
   if (!isCoherentMembershipState(room, memberships, deadlines)) {
     throw new Error('Invalid Room snapshot Connection ownership.');

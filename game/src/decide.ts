@@ -2,6 +2,7 @@ import {
   isRoomSettingsInRange,
   isValidCosmetics,
   MAX_NAME_LENGTH,
+  PLAYER_ROUND_HOP_LIMIT,
   type ClientIntent,
   type ErrorCode,
 } from '@wikispeedrun/shared';
@@ -183,6 +184,12 @@ function decideClient(
       // timer struck); that is not a user error, just a stale intent.
       if (room.phase !== 'racing' || !room.round) return { ok: true, events: [] };
       if (player.finishedRank !== null || player.gaveUp) return { ok: true, events: [] };
+      if (Math.max(0, player.path.length - 1) >= PLAYER_ROUND_HOP_LIMIT) {
+        return reject(
+          'hop-limit-reached',
+          `A Player may make at most ${PLAYER_ROUND_HOP_LIMIT} hops per round.`,
+        );
+      }
 
       // Hop legality (was the article reachable from the previous page?) is a
       // deliberate no-op in v1 — see ARCHITECTURE.md standing decisions.

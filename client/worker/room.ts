@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { type ApiErrorResponse, type ErrorCode } from '@wikispeedrun/shared';
 import {
   closeSafely,
+  isMessageWithinByteLimit,
   parseAttachment,
   parseAuthenticatedMessage,
   parseConnectMessage,
@@ -15,6 +16,7 @@ import { processPlayerIntent } from './roomGameplay.js';
 import { disconnectMembership, kickMembership } from './roomPresence.js';
 import { ROOM_STORAGE_KEY, parseRoomSnapshot, type RoomSnapshot } from './snapshot.js';
 import { processRoomAlarm, startRoundPreparation } from './roomLifecycle.js';
+import { consumeAuthenticatedMessage } from './roomRateLimit.js';
 import {
   authenticateMembership,
   createRoomClaim,
@@ -53,6 +55,15 @@ export class RoomDurableObject extends DurableObject<Env> {
   }
 
   override async webSocketMessage(socket: WebSocket, raw: string | ArrayBuffer): Promise<void> {
+    if (!isMessageWithinByteLimit(raw)) {
+      rejectSocket(
+        socket,
+        'message-too-large',
+        'Room messages may be at most 4,096 UTF-8 bytes.',
+        1009,
+      );
+      return;
+    }
     const attachment = parseAttachment(socket.deserializeAttachment());
     if (!attachment) {
       rejectSocket(socket, 'invalid-membership', 'Invalid connection state.', 4003);
@@ -60,6 +71,17 @@ export class RoomDurableObject extends DurableObject<Env> {
     }
     if (attachment.state === 'authenticated') {
       const message = parseAuthenticatedMessage(raw);
+      if (message === 'invalid' || message === 'unsupported') {
+        const claim = await consumeAuthenticatedMessage(
+          this.ctx,
+          attachment.playerId,
+          attachment.connectionId,
+        );
+        if (!claim.ok) {
+          this.sendActionError(socket, claim.code, claim.message);
+          return;
+        }
+      }
       if (message === 'invalid') {
         send(socket, {
           type: 'room/error',
@@ -106,7 +128,16 @@ export class RoomDurableObject extends DurableObject<Env> {
       connectionId,
     );
     if (!authentication.ok) {
-      rejectSocket(socket, 'invalid-membership', 'The Room Membership is invalid.', 4003);
+      if (authentication.reason === 'rate-limited') {
+        rejectSocket(
+          socket,
+          'rate-limited',
+          'This Room Membership sent too many messages. Try again shortly.',
+          1008,
+        );
+      } else {
+        rejectSocket(socket, 'invalid-membership', 'The Room Membership is invalid.', 4003);
+      }
       return;
     }
 
@@ -156,7 +187,7 @@ export class RoomDurableObject extends DurableObject<Env> {
   ): Promise<void> {
     const result = await startRoundPreparation(this.ctx, playerId, connectionId);
     if (result.kind === 'error') {
-      send(socket, { type: 'room/error', code: result.code, message: result.message });
+      this.sendActionError(socket, result.code, result.message);
     } else {
       this.broadcastSync(result.snapshot);
     }
@@ -170,7 +201,7 @@ export class RoomDurableObject extends DurableObject<Env> {
   ): Promise<void> {
     const result = await processPlayerIntent(this.ctx, playerId, connectionId, intent);
     if (result.kind === 'error') {
-      send(socket, { type: 'room/error', code: result.code, message: result.message });
+      this.sendActionError(socket, result.code, result.message);
     } else if (result.kind === 'sync') {
       this.broadcastSync(result.snapshot);
     }
@@ -184,7 +215,7 @@ export class RoomDurableObject extends DurableObject<Env> {
   ): Promise<void> {
     const result = await kickMembership(this.ctx, actorId, actorConnectionId, targetId);
     if (result.kind === 'error') {
-      send(socket, { type: 'room/error', code: result.code, message: result.message });
+      this.sendActionError(socket, result.code, result.message);
       return;
     }
     for (const target of this.ctx.getWebSockets()) {
@@ -215,6 +246,14 @@ export class RoomDurableObject extends DurableObject<Env> {
       attachment.connectionId,
     );
     if (result.kind === 'sync') this.broadcastSync(result.snapshot);
+  }
+
+  private sendActionError(socket: WebSocket, code: ErrorCode, message: string): void {
+    if (code === 'rate-limited') {
+      rejectSocket(socket, code, message, 1008);
+      return;
+    }
+    send(socket, { type: 'room/error', code, message });
   }
 
   private broadcastSync(snapshot: RoomSnapshot): void {

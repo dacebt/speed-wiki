@@ -9,6 +9,7 @@ import {
   MEMBERSHIP_GRACE_MS,
   type MembershipGraceDeadline,
 } from './roomSchedule.js';
+import { claimAuthenticatedMessage } from './roomRateLimit.js';
 import { ROOM_STORAGE_KEY, parseRoomSnapshot, type RoomSnapshot } from './snapshot.js';
 
 export type PresenceResult =
@@ -117,38 +118,33 @@ export async function kickMembership(
   actorConnectionId: string,
   targetId: string,
 ): Promise<KickResult> {
+  const at = Date.now();
   return state.storage.transaction(async (transaction): Promise<KickResult> => {
     const stored = await transaction.get(ROOM_STORAGE_KEY);
     if (stored === undefined) {
       return { kind: 'error', code: 'room-not-found', message: 'No room found with that code.' };
     }
-    const current = parseRoomSnapshot(stored);
-    const actorMembership = current.memberships[actorId];
-    if (!actorMembership) {
-      return {
-        kind: 'error',
-        code: 'invalid-membership',
-        message: 'The Room Membership is invalid.',
-      };
-    }
-    if (actorMembership.activeConnectionId !== actorConnectionId) {
-      return {
-        kind: 'error',
-        code: 'connection-replaced',
-        message: 'This Room Membership was opened in another tab.',
-      };
-    }
+    const claim = claimAuthenticatedMessage(
+      parseRoomSnapshot(stored),
+      actorId,
+      actorConnectionId,
+      at,
+    );
+    if (!claim.ok) return { kind: 'error', code: claim.code, message: claim.message };
+    const current = claim.snapshot;
     const decision = decide(current.room, {
       kind: 'client',
       playerId: actorId,
-      at: Date.now(),
+      at,
       intent: { type: 'room/kick', playerId: targetId },
     });
     if (!decision.ok) {
+      await transaction.put(ROOM_STORAGE_KEY, current);
       return { kind: 'error', code: decision.code, message: decision.message };
     }
     const membership = current.memberships[targetId];
     if (!membership || decision.events.length === 0) {
+      await transaction.put(ROOM_STORAGE_KEY, current);
       return { kind: 'error', code: 'not-in-room', message: 'No such player to remove.' };
     }
     const room = decision.events.reduce(reduce, current.room);

@@ -4,6 +4,14 @@ import type { RoomSettings, RoomSync } from './room.js';
 // Every client→server intent and server→client message, defined once.
 // Clients send intents; the server decides; clients render what they're told.
 
+export const ROOM_MEMBERSHIP_LIMIT = 8;
+export const WEBSOCKET_MESSAGE_BYTE_LIMIT = 4_096;
+export const MEMBERSHIP_MESSAGE_RATE_LIMIT = {
+  messages: 20,
+  windowMs: 10_000,
+} as const;
+export const PLAYER_ROUND_HOP_LIMIT = 100;
+
 export type ClientIntent =
   // The legacy server accepts its client-generated playerId here. The Worker
   // boundary never trusts this shape for Membership creation: it issues both
@@ -38,6 +46,10 @@ export const ERROR_CODES = [
   'wrong-phase',
   'invalid-settings',
   'article-fetch-failed',
+  'room-full',
+  'message-too-large',
+  'rate-limited',
+  'hop-limit-reached',
   /** Sent to a player the host removed from the lobby; the client clears its
       room and returns to Home. */
   'kicked',

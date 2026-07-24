@@ -9,6 +9,7 @@ import {
 import { nextDeadline, phaseDeadline, replacePhaseDeadline, syncAlarm } from './roomSchedule.js';
 import { finishRoundTimeout } from './roomGameplay.js';
 import { expireMembershipGrace } from './roomPresence.js';
+import { claimAuthenticatedMessage } from './roomRateLimit.js';
 import { pickPair } from './wikipedia.js';
 
 const PREPARATION_ALARM_DELAY_MS = 500;
@@ -36,22 +37,9 @@ export async function startRoundPreparation(
     if (stored === undefined) {
       return { kind: 'error', code: 'room-not-found', message: 'No room found with that code.' };
     }
-    const currentSnapshot = parseRoomSnapshot(stored);
-    const membership = currentSnapshot.memberships[playerId];
-    if (!membership) {
-      return {
-        kind: 'error',
-        code: 'invalid-membership',
-        message: 'The Room Membership is invalid.',
-      };
-    }
-    if (membership.activeConnectionId !== connectionId) {
-      return {
-        kind: 'error',
-        code: 'connection-replaced',
-        message: 'This Room Membership was opened in another tab.',
-      };
-    }
+    const claim = claimAuthenticatedMessage(parseRoomSnapshot(stored), playerId, connectionId, at);
+    if (!claim.ok) return { kind: 'error', code: claim.code, message: claim.message };
+    const currentSnapshot = claim.snapshot;
     const decision = decide(currentSnapshot.room, {
       kind: 'client',
       playerId,
@@ -59,6 +47,7 @@ export async function startRoundPreparation(
       intent: { type: 'game/start' },
     });
     if (!decision.ok) {
+      await transaction.put(ROOM_STORAGE_KEY, currentSnapshot);
       return { kind: 'error', code: decision.code, message: decision.message };
     }
     const token = crypto.randomUUID();

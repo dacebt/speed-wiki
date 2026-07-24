@@ -271,6 +271,10 @@ function openMembership(
         return;
       }
       if (message.type === 'room/error') {
+        if (synced && message.code === 'hop-limit-reached') {
+          notifyMessage(message);
+          return;
+        }
         if (message.code === 'connection-replaced') {
           if (synced) {
             terminateOwned(version, membership, message.code, message.message);
@@ -311,7 +315,12 @@ function openMembership(
         finishFailure(failure.code, failure.message);
         return;
       }
-      if (failure.code === 'connection-replaced' || failure.code === 'invalid-membership') {
+      if (
+        failure.code === 'connection-replaced' ||
+        failure.code === 'invalid-membership' ||
+        failure.code === 'message-too-large' ||
+        failure.code === 'rate-limited'
+      ) {
         terminateOwned(version, membership, failure.code, failure.message);
         return;
       }
@@ -357,7 +366,10 @@ async function reconnect(operation: ReconnectOperation): Promise<void> {
       if (error instanceof ConnectionAttemptCancelled || !ownsReconnect(operation)) return;
       if (
         error instanceof TransportConnectionError &&
-        (error.code === 'invalid-membership' || error.code === 'connection-replaced')
+        (error.code === 'invalid-membership' ||
+          error.code === 'connection-replaced' ||
+          error.code === 'message-too-large' ||
+          error.code === 'rate-limited')
       ) {
         terminateOwned(version, membership, error.code, error.message);
         return;

@@ -1,6 +1,7 @@
 import { decide, reduce } from '@wikispeedrun/game';
 import type { ErrorCode } from '@wikispeedrun/shared';
 import type { WorkerPlayerIntent } from './roomConnection.js';
+import { claimAuthenticatedMessage } from './roomRateLimit.js';
 import { phaseDeadline, replacePhaseDeadline, syncAlarm } from './roomSchedule.js';
 import {
   ROOM_STORAGE_KEY,
@@ -30,28 +31,16 @@ export async function processPlayerIntent(
     if (stored === undefined) {
       return { kind: 'error', code: 'room-not-found', message: 'No room found with that code.' };
     }
-    const current = parseRoomSnapshot(stored);
-    const membership = current.memberships[playerId];
-    if (!membership) {
-      return {
-        kind: 'error',
-        code: 'invalid-membership',
-        message: 'The Room Membership is invalid.',
-      };
-    }
-    if (membership.activeConnectionId !== connectionId) {
-      return {
-        kind: 'error',
-        code: 'connection-replaced',
-        message: 'This Room Membership was opened in another tab.',
-      };
-    }
+    const claim = claimAuthenticatedMessage(parseRoomSnapshot(stored), playerId, connectionId, at);
+    if (!claim.ok) return { kind: 'error', code: claim.code, message: claim.message };
+    const current = claim.snapshot;
     const deadline = phaseDeadline(current.deadlines);
     if (
       current.room.phase === 'racing' &&
       deadline?.kind === 'round-timeout' &&
       at >= deadline.at
     ) {
+      await transaction.put(ROOM_STORAGE_KEY, current);
       return {
         kind: 'error',
         code: 'wrong-phase',
@@ -60,9 +49,13 @@ export async function processPlayerIntent(
     }
     const decision = decide(current.room, { kind: 'client', playerId, at, intent });
     if (!decision.ok) {
+      await transaction.put(ROOM_STORAGE_KEY, current);
       return { kind: 'error', code: decision.code, message: decision.message };
     }
-    if (decision.events.length === 0) return { kind: 'none' };
+    if (decision.events.length === 0) {
+      await transaction.put(ROOM_STORAGE_KEY, current);
+      return { kind: 'none' };
+    }
 
     const room = decision.events.reduce(reduce, current.room);
     const deadlines =
