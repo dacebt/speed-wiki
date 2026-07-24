@@ -1,6 +1,12 @@
 import { decide, reduce } from '@wikispeedrun/game';
 import type { ErrorCode } from '@wikispeedrun/shared';
-import { ROOM_STORAGE_KEY, parseRoomSnapshot, type RoomSnapshot } from './snapshot.js';
+import {
+  ROOM_STORAGE_KEY,
+  parseRoomSnapshot,
+  roundTimeoutToken,
+  type RoomSnapshot,
+} from './snapshot.js';
+import { finishRoundTimeout } from './roomGameplay.js';
 import { pickPair } from './wikipedia.js';
 
 const PREPARATION_ALARM_DELAY_MS = 500;
@@ -79,9 +85,14 @@ export async function processRoomAlarm(state: DurableObjectState): Promise<Alarm
     await state.storage.setAlarm(snapshot.deadline.at);
     return { kind: 'none' };
   }
-  return snapshot.deadline.kind === 'round-preparation'
-    ? prepareRound(state, snapshot)
-    : finishCountdown(state, snapshot);
+  switch (snapshot.deadline.kind) {
+    case 'round-preparation':
+      return prepareRound(state, snapshot);
+    case 'countdown':
+      return finishCountdown(state, snapshot);
+    case 'round-timeout':
+      return finishRoundTimeout(state, snapshot);
+  }
 }
 
 async function prepareRound(
@@ -215,15 +226,21 @@ async function finishCountdown(
       at: Date.now(),
     });
     if (!decision.ok || decision.events.length === 0) return null;
+    const room = decision.events.reduce(reduce, current.room);
+    if (!room.round) return null;
     const next: RoomSnapshot = {
       ...current,
-      room: decision.events.reduce(reduce, current.room),
+      room,
       roundPreparation: null,
-      deadline: null,
+      deadline: {
+        kind: 'round-timeout',
+        token: roundTimeoutToken(room.round),
+        at: room.round.deadline,
+      },
     };
     parseRoomSnapshot(next);
     await transaction.put(ROOM_STORAGE_KEY, next);
-    await transaction.deleteAlarm();
+    await transaction.setAlarm(room.round.deadline);
     return next;
   });
   return started ? { kind: 'sync', snapshot: started } : { kind: 'none' };

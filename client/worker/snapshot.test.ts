@@ -311,6 +311,49 @@ describe('durable Room snapshot validation', () => {
     expect(parseRoomSnapshot(racingSnapshot())).toEqual(racingSnapshot());
   });
 
+  test.each([
+    [
+      'missing racing timeout',
+      (snapshot: RoomSnapshot) => {
+        snapshot.deadline = null;
+      },
+    ],
+    [
+      'wrong racing timeout kind',
+      (snapshot: RoomSnapshot) => {
+        snapshot.deadline!.kind = 'countdown';
+        snapshot.deadline!.token = PREPARATION_TOKEN;
+      },
+    ],
+    [
+      'wrong racing timeout token',
+      (snapshot: RoomSnapshot) => {
+        snapshot.deadline!.token = 'round:2:1000';
+      },
+    ],
+    [
+      'wrong racing timeout instant',
+      (snapshot: RoomSnapshot) => {
+        snapshot.deadline!.at += 1;
+      },
+    ],
+  ])('rejects %s', (_label, mutate) => {
+    const snapshot = racingSnapshot();
+    mutate(snapshot);
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('pending runtime state');
+  });
+
+  test('accepts results only after the racing timeout is cleared', () => {
+    const snapshot = resultsSnapshot();
+    expect(parseRoomSnapshot(snapshot)).toEqual(snapshot);
+    snapshot.deadline = {
+      kind: 'round-timeout',
+      token: 'round:1:1000',
+      at: 601_000,
+    };
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('pending runtime state');
+  });
+
   test('rejects an unknown key on round', () => {
     const snapshot = racingSnapshot();
     Object.assign(snapshot.room.round!, { extra: true });
@@ -386,5 +429,18 @@ function racingSnapshot(): RoomSnapshot {
     deadline: 601_000,
   };
   snapshot.room.players[0]!.path = ['Ada Lovelace'];
+  snapshot.deadline = {
+    kind: 'round-timeout',
+    token: 'round:1:1000',
+    at: 601_000,
+  };
+  return snapshot;
+}
+
+function resultsSnapshot(): RoomSnapshot {
+  const snapshot = racingSnapshot();
+  snapshot.room.phase = 'results';
+  snapshot.room.roundsPlayed = 1;
+  snapshot.deadline = null;
   return snapshot;
 }

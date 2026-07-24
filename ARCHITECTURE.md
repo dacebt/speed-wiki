@@ -41,8 +41,8 @@ time, so Socket.IO is absent from the Worker browser bundle and neither shell ro
 through the other. The Worker path covers protected Room creation, invited Membership
 joining, same-identity reconnection across Durable Object eviction, deterministic
 one-live-Connection replacement, and authenticated host Start through recoverable
-article preparation and a durable countdown. Later gameplay actions remain on the
-legacy shell until their capabilities move the rest of the lifecycle.
+article preparation, a durable countdown, one authoritative racing round, results,
+and host replay. Later Membership lifecycle actions remain on the legacy shell.
 
 Invited joining uses a two-step durable handshake. The browser gives the join POST one
 high-entropy attempt ID and a monotonic request generation. An ambiguous-response retry
@@ -63,13 +63,16 @@ selection; a random selection either succeeds within its bounded retry budget or
 returns the Room to the lobby with `article-fetch-failed`, never a curated substitute.
 Selection success persists the common pair, countdown state, and replacement countdown
 Deadline before broadcasting. That alarm is the sole transition into racing: it
-rechecks the preparation token, folds the core transition, clears pending runtime
-state, and persists before sync. Duplicate or stale alarm work is a no-op after
-eviction or at-least-once delivery. The Worker does not yet schedule round timeout.
-The two-browser smoke observes that live alarm path through the public product surface.
-Forced eviction remains integration evidence: `cloudflare:test` evicts the Room between
-both transitions while two sockets stay attached. The browser surface has no test-only
-route for controlling Durable Object lifetime.
+rechecks the preparation token, folds the core transition, replaces the countdown
+Deadline with a deterministic Round-identity timeout, and persists both racing state
+and its alarm before sync. Hops, give-up, and host replay re-run core authorization
+inside a storage transaction. Ordinary hops preserve the timeout; an all-done action
+persists results and clears it. A due timeout alarm is the other authoritative route
+to results. Duplicate, stale, or early alarm work is inert and a future Deadline is
+re-armed after early delivery. The two-browser smoke observes the complete public path
+through results and replay. Forced eviction remains integration evidence:
+`cloudflare:test` evicts the racing Room before timeout while sockets stay attached.
+The browser surface has no test-only route for controlling Durable Object lifetime.
 
 ## Rules
 

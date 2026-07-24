@@ -1,5 +1,10 @@
 import { toRoomSync } from '@wikispeedrun/game';
-import type { ErrorCode, RoomConnectMessage, ServerMessage } from '@wikispeedrun/shared';
+import type {
+  ClientIntent,
+  ErrorCode,
+  RoomConnectMessage,
+  ServerMessage,
+} from '@wikispeedrun/shared';
 import type { RoomSnapshot } from './snapshot.js';
 
 type PendingAttachment = { state: 'pending' };
@@ -42,7 +47,9 @@ export function parseConnectMessage(raw: string | ArrayBuffer): RoomConnectMessa
   }
 }
 
-export type AuthenticatedRoomMessage = { type: 'game/start' } | 'unsupported' | 'invalid';
+type SupportedIntentType = 'game/start' | 'race/hop' | 'race/giveUp' | 'game/playAgain';
+export type WorkerPlayerIntent = Extract<ClientIntent, { type: SupportedIntentType }>;
+export type AuthenticatedRoomMessage = WorkerPlayerIntent | 'unsupported' | 'invalid';
 
 export function parseAuthenticatedMessage(raw: string | ArrayBuffer): AuthenticatedRoomMessage {
   if (typeof raw !== 'string') return 'invalid';
@@ -50,10 +57,21 @@ export function parseAuthenticatedMessage(raw: string | ArrayBuffer): Authentica
     const value: unknown = JSON.parse(raw);
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'invalid';
     const record = value as Record<string, unknown>;
-    if (record.type !== 'game/start') {
-      return typeof record.type === 'string' ? 'unsupported' : 'invalid';
+    switch (record.type) {
+      case 'game/start':
+      case 'race/giveUp':
+      case 'game/playAgain':
+        return hasExactKeys(record, ['type']) ? { type: record.type } : 'invalid';
+      case 'race/hop':
+        return hasExactKeys(record, ['type', 'article']) &&
+          typeof record.article === 'string' &&
+          record.article.trim().length > 0 &&
+          record.article === record.article.trim()
+          ? { type: 'race/hop', article: record.article }
+          : 'invalid';
+      default:
+        return typeof record.type === 'string' ? 'unsupported' : 'invalid';
     }
-    return hasExactKeys(record, ['type']) ? { type: 'game/start' } : 'invalid';
   } catch {
     return 'invalid';
   }

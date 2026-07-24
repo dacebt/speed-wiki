@@ -66,8 +66,8 @@ afterEach(() => {
 });
 
 describe('Worker creation transport', () => {
-  test('advertises the racing surface as read-only', () => {
-    expect(supportsRaceActions).toBe(false);
+  test('advertises the authoritative racing actions', () => {
+    expect(supportsRaceActions).toBe(true);
   });
 
   test('shares one in-flight invited join and persists before publishing', async () => {

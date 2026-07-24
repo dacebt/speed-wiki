@@ -47,7 +47,8 @@ interface RoundPreparation {
 
 type RoomDeadline =
   | { kind: 'round-preparation'; token: string; at: number }
-  | { kind: 'countdown'; token: string; at: number };
+  | { kind: 'countdown'; token: string; at: number }
+  | { kind: 'round-timeout'; token: string; at: number };
 
 export interface RoomSnapshot {
   schemaVersion: typeof ROOM_SNAPSHOT_VERSION;
@@ -364,11 +365,17 @@ function parseDeadline(value: unknown): RoomDeadline | null | undefined {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ['kind', 'token', 'at']) ||
-    (value.kind !== 'round-preparation' && value.kind !== 'countdown') ||
+    (value.kind !== 'round-preparation' &&
+      value.kind !== 'countdown' &&
+      value.kind !== 'round-timeout') ||
     typeof value.token !== 'string' ||
-    !isUuid(value.token) ||
     !isPositiveInteger(value.at)
   ) {
+    return undefined;
+  }
+  if (value.kind === 'round-timeout') {
+    if (!/^round:[1-9]\d*:(?:0|[1-9]\d*)$/.test(value.token)) return undefined;
+  } else if (!isUuid(value.token)) {
     return undefined;
   }
   return { kind: value.kind, token: value.token, at: value.at };
@@ -515,5 +522,18 @@ function isCoherentRuntimeState(
       deadline.at === room.countdownEndsAt
     );
   }
+  if (room.phase === 'racing') {
+    return (
+      preparation === null &&
+      room.round !== null &&
+      deadline?.kind === 'round-timeout' &&
+      deadline.token === roundTimeoutToken(room.round) &&
+      deadline.at === room.round.deadline
+    );
+  }
   return preparation === null && deadline === null;
+}
+
+export function roundTimeoutToken(round: Pick<RoundView, 'roundNumber' | 'startedAt'>): string {
+  return `round:${round.roundNumber}:${round.startedAt}`;
 }

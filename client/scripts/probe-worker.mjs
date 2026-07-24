@@ -161,25 +161,45 @@ try {
     throw new Error('Browsers entered racing with different article pairs.');
   }
   if (
-    (await page.getByRole('button', { name: 'Give Up' }).count()) !== 0 ||
-    (await guestPage.getByRole('button', { name: 'Give Up' }).count()) !== 0
+    (await page.getByRole('button', { name: 'Give Up' }).count()) !== 1 ||
+    (await guestPage.getByRole('button', { name: 'Give Up' }).count()) !== 1
   ) {
-    throw new Error('Worker racing exposed an unsupported Give Up action.');
+    throw new Error('Worker racing did not expose its authoritative actions.');
   }
-  const beforeArticle = await page.locator('.article-pane__title').textContent();
-  const beforeTrail = await page.locator('.race__trail').textContent();
-  await page.locator('.article-pane__body a').click();
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  if (
-    (await page.locator('.article-pane__title').textContent()) !== beforeArticle ||
-    (await page.locator('.race__trail').textContent()) !== beforeTrail
-  ) {
-    throw new Error('Worker racing allowed an unsupported article hop.');
+
+  const goalLink = page.getByRole('link', { name: hostPair[1], exact: true });
+  await goalLink.waitFor();
+  const hostFinished = page.getByRole('heading', { name: 'You reached the goal!' }).waitFor();
+  await goalLink.click();
+  await hostFinished;
+
+  const hostResults = page.getByRole('heading', { name: 'Enlightenment Achieved' }).waitFor();
+  const guestResults = guestPage.getByRole('heading', { name: 'Enlightenment Achieved' }).waitFor();
+  await guestPage.getByRole('button', { name: 'Give Up' }).click();
+  await Promise.all([hostResults, guestResults]);
+  const hostRows = await page.locator('.results__table tbody tr').allTextContents();
+  const guestRows = await guestPage.locator('.results__table tbody tr').allTextContents();
+  if (JSON.stringify(hostRows) !== JSON.stringify(guestRows)) {
+    throw new Error('Browsers observed different authoritative results.');
   }
+  const scores = await page.locator('.results__fortune').allTextContents();
+  const roundPoints = await page.locator('.results__points').allTextContents();
+  if (scores.join(',') !== '5,0' || roundPoints.join(',') !== '+5,0') {
+    throw new Error('Worker results did not preserve expected finish and give-up scoring.');
+  }
+
+  if ((await guestPage.getByRole('button', { name: 'Play Again' }).count()) !== 0) {
+    throw new Error('Worker results exposed host replay authority to the guest.');
+  }
+  const hostLobbyAgain = page.getByRole('heading', { name: 'Lobby' }).waitFor();
+  const guestLobbyAgain = guestPage.getByRole('heading', { name: 'Lobby' }).waitFor();
+  await page.getByRole('button', { name: 'Play Again' }).click();
+  await Promise.all([hostLobbyAgain, guestLobbyAgain]);
+  const playedAgain = true;
 
   console.log(
     JSON.stringify({
-      phase: 'racing',
+      phase: 'lobby',
       players: 2,
       host: true,
       roomCode,
@@ -190,6 +210,10 @@ try {
       identitiesPreserved,
       prepared,
       alarmTransitioned: true,
+      resultRows: hostRows,
+      scores,
+      roundPoints,
+      playedAgain,
       startArticle: hostPair[0],
       goalArticle: hostPair[1],
       surface: 'react',
@@ -240,10 +264,20 @@ async function stubArticleHtml(context) {
       '_',
       ' ',
     );
+    const goal =
+      (
+        await route
+          .request()
+          .frame()
+          .locator('.race__route-title--goal')
+          .textContent({ timeout: 2_000 })
+      )?.trim() ?? '';
+    if (!goal) throw new Error('Article stub could not observe the rendered goal.');
+    const goalHref = encodeURIComponent(goal.replaceAll(' ', '_'));
     await route.fulfill({
       status: 200,
       contentType: 'text/html',
-      body: `<article><p>Stubbed article for ${escapeHtml(title)}. <a href="/wiki/Unsupported_Hop">Try another article</a></p></article>`,
+      body: `<article><p>Stubbed article for ${escapeHtml(title)}. <a href="./${goalHref}">${escapeHtml(goal)}</a></p></article>`,
     });
   });
 }

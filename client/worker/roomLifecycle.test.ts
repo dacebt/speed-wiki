@@ -47,7 +47,7 @@ describe('durable Round preparation and countdown', () => {
     socket.close(1000, 'Test complete.');
   });
 
-  test('eviction preserves one pair through due alarms and duplicate delivery is inert', async () => {
+  test('eviction preserves one pair through due preparation and countdown alarms', async () => {
     const host = await createRoom('Host');
     const hostSocket = await connect(host);
     const guest = await joinRoom(host.roomCode, 'Guest');
@@ -94,11 +94,12 @@ describe('durable Round preparation and countdown', () => {
     );
     const started = await storedRuntime(host.roomCode);
     expect(started.snapshot.roundPreparation).toBeNull();
-    expect(started.snapshot.deadline).toBeNull();
-    expect(started.alarm).toBeNull();
-    expect(await runDurableObjectAlarm(stub)).toBe(false);
-    await runInDurableObject(stub, async (instance) => instance.alarm());
-    expect(await storedRuntime(host.roomCode)).toEqual(started);
+    expect(started.snapshot.deadline).toEqual({
+      kind: 'round-timeout',
+      token: `round:${started.snapshot.room.round?.roundNumber}:${started.snapshot.room.round?.startedAt}`,
+      at: started.snapshot.room.round?.deadline,
+    });
+    expect(started.alarm).toBe(started.snapshot.room.round?.deadline);
     hostSocket.close(1000, 'Test complete.');
     guestSocket.close(1000, 'Test complete.');
   });

@@ -37,14 +37,44 @@ describe('Room Connection exact validation', () => {
     ).toBeNull();
   });
 
-  test('accepts only exact Start after authentication', () => {
+  test('accepts only exact supported intents after authentication', () => {
     expect(parseAuthenticatedMessage(JSON.stringify({ type: 'game/start' }))).toEqual({
       type: 'game/start',
+    });
+    expect(
+      parseAuthenticatedMessage(JSON.stringify({ type: 'race/hop', article: 'Ada Lovelace' })),
+    ).toEqual({ type: 'race/hop', article: 'Ada Lovelace' });
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'race/giveUp' }))).toEqual({
+      type: 'race/giveUp',
+    });
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'game/playAgain' }))).toEqual({
+      type: 'game/playAgain',
     });
     expect(parseAuthenticatedMessage(JSON.stringify({ type: 'game/start', extra: true }))).toBe(
       'invalid',
     );
-    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'race/hop' }))).toBe('unsupported');
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'race/hop' }))).toBe('invalid');
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'race/hop', article: '' }))).toBe(
+      'invalid',
+    );
+    expect(
+      parseAuthenticatedMessage(JSON.stringify({ type: 'race/hop', article: ' Ada Lovelace' })),
+    ).toBe('invalid');
+    expect(
+      parseAuthenticatedMessage(JSON.stringify({ type: 'race/hop', article: 'Ada Lovelace ' })),
+    ).toBe('invalid');
+    expect(
+      parseAuthenticatedMessage(
+        JSON.stringify({ type: 'race/hop', article: 'Ada Lovelace', extra: true }),
+      ),
+    ).toBe('invalid');
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'race/giveUp', extra: true }))).toBe(
+      'invalid',
+    );
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'game/playAgain', extra: true }))).toBe(
+      'invalid',
+    );
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'room/kick' }))).toBe('unsupported');
     expect(parseAuthenticatedMessage(new ArrayBuffer(0))).toBe('invalid');
   });
 

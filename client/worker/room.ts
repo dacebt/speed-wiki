@@ -9,7 +9,9 @@ import {
   send,
   sendSync,
   trySend,
+  type WorkerPlayerIntent,
 } from './roomConnection.js';
+import { processPlayerIntent } from './roomGameplay.js';
 import { ROOM_STORAGE_KEY, parseRoomSnapshot, type RoomSnapshot } from './snapshot.js';
 import { processRoomAlarm, startRoundPreparation } from './roomLifecycle.js';
 import {
@@ -69,8 +71,10 @@ export class RoomDurableObject extends DurableObject<Env> {
           code: 'room-unavailable',
           message: 'This Room action is not available in the current migration slice.',
         });
-      } else {
+      } else if (message.type === 'game/start') {
         await this.startRoundPreparation(socket, attachment.playerId);
+      } else {
+        await this.processPlayerIntent(socket, attachment.playerId, message);
       }
       return;
     }
@@ -126,6 +130,19 @@ export class RoomDurableObject extends DurableObject<Env> {
     if (result.kind === 'error') {
       send(socket, { type: 'room/error', code: result.code, message: result.message });
     } else {
+      this.broadcastSync(result.snapshot);
+    }
+  }
+
+  private async processPlayerIntent(
+    socket: WebSocket,
+    playerId: string,
+    intent: Exclude<WorkerPlayerIntent, { type: 'game/start' }>,
+  ): Promise<void> {
+    const result = await processPlayerIntent(this.ctx, playerId, intent);
+    if (result.kind === 'error') {
+      send(socket, { type: 'room/error', code: result.code, message: result.message });
+    } else if (result.kind === 'sync') {
       this.broadcastSync(result.snapshot);
     }
   }
