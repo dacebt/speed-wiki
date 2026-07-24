@@ -8,22 +8,21 @@ This document explains the architecture so it can be picked up cold. It describe
 shape and the rules of the system, not its current contents — for what messages,
 events, or features exist right now, read the code; `shared/` is the entry point.
 
-## The three pillars
+## The four pillars
 
 **1. Shared message catalog (`shared/`).** Every client↔server message, room event,
 and state shape is a named type defined once in `shared/` and imported by both sides.
 This is the spine of the system: the vocabulary of everything the app does lives in
-one place, and to understand the app you start by reading it. Nothing in `shared/`
-has behavior — types and pure constants only, importing nothing.
+one place, and to understand the app you start by reading it. `shared/` contains
+transport-neutral types, catalogs, constants, and their small pure validators; it
+imports nothing from another workspace package.
 
-**2. Event-sourced functional core (`server/game/`).** A room's state is a pure fold
+**2. Event-sourced functional core (`game/`).** A room's state is a pure fold
 over its event log: intents are validated into events, events are reduced into state,
 and all game rules (lifecycle, scoring, timing decisions) live in pure functions.
 No I/O, no sockets, no timers, and no reading the clock inside the core — time enters
-as data on intents and events. Everything effectful (socket transport, timer
-scheduling, the room registry) lives in a thin imperative shell around it. The event
-log is also the record of the round: results and stats are derived from it, and it
-dies with the room — no persistence, no snapshots.
+as data on intents and events. Both runtime shells depend on the behavior-only
+`@wikispeedrun/game` package; browser code never does.
 
 **3. MVU client with feature slices (`client/`).** Client state is a reducer over
 server messages and local UI events; views are functions of state. Code is organized
@@ -32,12 +31,23 @@ feature means working in one folder. The Wikipedia viewer — fetching, sanitizi
 link interception — is one such slice, deliberately isolated so its fetching can move
 behind the server later without touching anything else.
 
+**4. Explicit runtime shells.** The complete legacy product remains runnable through
+`pnpm dev:legacy`: one Node process, a Socket.IO edge, an in-memory room registry,
+and JavaScript timers. The production-shaped path runs through `pnpm dev:worker`:
+Vite serves the same SPA with a native-WebSocket transport, a same-origin Worker
+allocates a named Room Durable Object, and that object validates and persists a
+versioned Room snapshot before sending a full sync. The runtime is selected at build
+time, so Socket.IO is absent from the Worker browser bundle and neither shell routes
+through the other. The Worker path currently covers protected Room creation and the
+first lobby sync; later capabilities move the remaining lifecycle before the legacy
+shell is removed.
+
 ## Rules
 
 Placement — where new work goes:
 
 - A new client↔server interaction starts as a type in `shared/`, gets its game logic
-  in the core, its transport in the shell, and its rendering in one client feature.
+  in `game/`, its transport in the active shell, and its rendering in one client feature.
   If a change needs to touch places beyond those, the design is wrong.
 - Game rules change only in the core. Screens and player-facing capabilities are new
   client feature folders. Spikes go in `prototype/`, which nothing imports from.
@@ -51,12 +61,23 @@ Legality — what is never allowed:
 - The client never computes authority: no client-side placement, timing, or win
   detection. Clients send intents, the server decides, clients render what they're
   told. Timestamps are server-assigned; client-sent times are ignored.
-- Socket code stays at the edges — one place on the server, one on the client.
+- Transport code stays at the edges. Membership credentials are shell concerns and
+  never enter the game core or a `RoomSync`.
+- Persisted bytes are untrusted: every Durable Object storage load is parsed before
+  it enters the core or a client view. Accepted state is persisted before broadcast.
+- A public Player ID identifies a seat; only the secret, one-way-digested Rejoin
+  credential proves Membership. A live Connection is transient and hibernation-safe.
 
 ## Standing decisions
 
-- **Server-authoritative, rooms in memory, no database.** Scores are per-session.
-  One stateful Node process; not deployable serverless.
+- **Server-authoritative, ephemeral Rooms.** Scores remain per-session and no permanent
+  match history is retained. The Cloudflare runtime stores a versioned snapshot in
+  one SQLite-backed Durable Object per Room so eviction does not erase a live session;
+  this is lifecycle durability, not a user database.
+- **Cloudflare is the production target.** Static assets, HTTP allocation, and
+  WebSockets share one Worker origin. Room code names the Durable Object. The
+  declarative `exports` configuration owns the SQLite class lifecycle; no D1, KV,
+  account model, or separate backend is introduced.
 - **The client fetches Wikipedia directly** (its REST API is CORS-open). The seam to
   proxy through the server exists for when caching or hop verification is wanted;
   relatedly, hop legality is a validation step in the core that v1 leaves as a no-op.

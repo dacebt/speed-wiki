@@ -1,0 +1,310 @@
+import type { CorePlayer, CoreRoom } from '@wikispeedrun/game';
+import {
+  CATEGORIES,
+  DIFFICULTIES,
+  MAX_NAME_LENGTH,
+  ROOM_PHASES,
+  isRoomSettingsInRange,
+  isValidCosmetics,
+  normalizeRoomCode,
+  type RoomSettings,
+  type RoundView,
+} from '@wikispeedrun/shared';
+
+export const ROOM_SNAPSHOT_VERSION = 1;
+export const ROOM_STORAGE_KEY = 'room';
+
+interface Membership {
+  credentialDigest: string;
+}
+
+export interface RoomSnapshot {
+  schemaVersion: typeof ROOM_SNAPSHOT_VERSION;
+  room: CoreRoom;
+  memberships: Record<string, Membership>;
+}
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: UnknownRecord, keys: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && actual.every((key) => keys.includes(key));
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+function isNullableNonNegativeInteger(value: unknown): value is number | null {
+  return value === null || isNonNegativeInteger(value);
+}
+
+function isNullablePositiveInteger(value: unknown): value is number | null {
+  return value === null || isPositiveInteger(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => typeof item === 'string' && item.trim().length > 0)
+  );
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function parseSettings(value: unknown): RoomSettings | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['roundDurationMs', 'countdownMs', 'difficulty', 'category']) ||
+    !isPositiveInteger(value.roundDurationMs) ||
+    !isPositiveInteger(value.countdownMs) ||
+    typeof value.difficulty !== 'string' ||
+    !(DIFFICULTIES as readonly string[]).includes(value.difficulty) ||
+    typeof value.category !== 'string' ||
+    !(CATEGORIES as readonly string[]).includes(value.category)
+  ) {
+    return null;
+  }
+  const settings: RoomSettings = {
+    roundDurationMs: value.roundDurationMs,
+    countdownMs: value.countdownMs,
+    difficulty: value.difficulty as RoomSettings['difficulty'],
+    category: value.category as RoomSettings['category'],
+  };
+  return isRoomSettingsInRange(settings) ? settings : null;
+}
+
+function parseRound(value: unknown): RoundView | null | undefined {
+  if (value === null) return null;
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['roundNumber', 'startArticle', 'goalArticle', 'startedAt', 'deadline']) ||
+    !isPositiveInteger(value.roundNumber) ||
+    typeof value.startArticle !== 'string' ||
+    value.startArticle.trim().length === 0 ||
+    typeof value.goalArticle !== 'string' ||
+    value.goalArticle.trim().length === 0 ||
+    !isNonNegativeInteger(value.startedAt) ||
+    !isPositiveInteger(value.deadline) ||
+    value.deadline <= value.startedAt
+  ) {
+    return undefined;
+  }
+  return {
+    roundNumber: value.roundNumber,
+    startArticle: value.startArticle,
+    goalArticle: value.goalArticle,
+    startedAt: value.startedAt,
+    deadline: value.deadline,
+  };
+}
+
+function parsePlayer(value: unknown): CorePlayer | null {
+  const cosmetics =
+    isRecord(value) &&
+    isRecord(value.cosmetics) &&
+    hasExactKeys(value.cosmetics, ['faceId', 'hatId']) &&
+    typeof value.cosmetics.faceId === 'string' &&
+    typeof value.cosmetics.hatId === 'string'
+      ? { faceId: value.cosmetics.faceId, hatId: value.cosmetics.hatId }
+      : null;
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      'id',
+      'name',
+      'cosmetics',
+      'isHost',
+      'score',
+      'roundPoints',
+      'path',
+      'finishedRank',
+      'finishedAfterMs',
+      'gaveUp',
+      'away',
+    ]) ||
+    typeof value.id !== 'string' ||
+    !isUuid(value.id) ||
+    typeof value.name !== 'string' ||
+    value.name.trim().length === 0 ||
+    value.name !== value.name.trim() ||
+    value.name.length > MAX_NAME_LENGTH ||
+    !cosmetics ||
+    !isValidCosmetics(cosmetics) ||
+    typeof value.isHost !== 'boolean' ||
+    !isNonNegativeInteger(value.score) ||
+    !isNonNegativeInteger(value.roundPoints) ||
+    !isStringArray(value.path) ||
+    !isNullablePositiveInteger(value.finishedRank) ||
+    !isNullableNonNegativeInteger(value.finishedAfterMs) ||
+    typeof value.gaveUp !== 'boolean' ||
+    typeof value.away !== 'boolean' ||
+    (value.finishedRank === null) !== (value.finishedAfterMs === null) ||
+    (value.gaveUp && value.finishedRank !== null)
+  ) {
+    return null;
+  }
+  return {
+    id: value.id,
+    name: value.name,
+    cosmetics,
+    isHost: value.isHost,
+    score: value.score,
+    roundPoints: value.roundPoints,
+    path: value.path,
+    finishedRank: value.finishedRank,
+    finishedAfterMs: value.finishedAfterMs,
+    gaveUp: value.gaveUp,
+    away: value.away,
+  };
+}
+
+function parseRoom(value: unknown): CoreRoom | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      'code',
+      'phase',
+      'players',
+      'round',
+      'countdownEndsAt',
+      'settings',
+      'roundsPlayed',
+      'ranksAssigned',
+    ]) ||
+    typeof value.code !== 'string' ||
+    typeof value.phase !== 'string' ||
+    !(ROOM_PHASES as readonly string[]).includes(value.phase) ||
+    !Array.isArray(value.players) ||
+    !isNullablePositiveInteger(value.countdownEndsAt) ||
+    !isNonNegativeInteger(value.roundsPlayed) ||
+    !isNonNegativeInteger(value.ranksAssigned)
+  ) {
+    return null;
+  }
+  const players = value.players.map(parsePlayer);
+  const round = parseRound(value.round);
+  const settings = parseSettings(value.settings);
+  if (
+    normalizeRoomCode(value.code) !== value.code ||
+    players.some((player) => player === null) ||
+    round === undefined ||
+    settings === null
+  ) {
+    return null;
+  }
+  const room: CoreRoom = {
+    code: value.code,
+    phase: value.phase as CoreRoom['phase'],
+    players: players as CorePlayer[],
+    round,
+    countdownEndsAt: value.countdownEndsAt,
+    settings,
+    roundsPlayed: value.roundsPlayed,
+    ranksAssigned: value.ranksAssigned,
+  };
+  return isCoherentRoom(room) ? room : null;
+}
+
+function parseMemberships(value: unknown): Record<string, Membership> | null {
+  if (!isRecord(value)) return null;
+  const memberships: Record<string, Membership> = {};
+  for (const [playerId, membership] of Object.entries(value)) {
+    if (
+      !isUuid(playerId) ||
+      !isRecord(membership) ||
+      !hasExactKeys(membership, ['credentialDigest']) ||
+      typeof membership.credentialDigest !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(membership.credentialDigest)
+    ) {
+      return null;
+    }
+    memberships[playerId] = { credentialDigest: membership.credentialDigest };
+  }
+  return memberships;
+}
+
+function isCoherentRoom(room: CoreRoom): boolean {
+  const playerIds = room.players.map((player) => player.id);
+  if (
+    new Set(playerIds).size !== playerIds.length ||
+    room.ranksAssigned > room.players.length ||
+    room.players.filter((player) => player.isHost).length !== 1
+  ) {
+    return false;
+  }
+
+  const ranks = room.players
+    .map((player) => player.finishedRank)
+    .filter((rank): rank is number => rank !== null)
+    .sort((left, right) => left - right);
+  if (ranks.length !== room.ranksAssigned || ranks.some((rank, index) => rank !== index + 1)) {
+    return false;
+  }
+
+  switch (room.phase) {
+    case 'lobby':
+      return room.round === null && room.countdownEndsAt === null;
+    case 'countdown':
+      return room.round === null && room.countdownEndsAt !== null;
+    case 'racing':
+      return (
+        room.round !== null &&
+        room.countdownEndsAt === null &&
+        room.round.roundNumber === room.roundsPlayed + 1 &&
+        isCoherentActiveRound(room)
+      );
+    case 'results':
+      return (
+        room.round !== null &&
+        room.countdownEndsAt === null &&
+        room.round.roundNumber === room.roundsPlayed &&
+        isCoherentActiveRound(room)
+      );
+  }
+}
+
+function isCoherentActiveRound(room: CoreRoom): boolean {
+  const round = room.round;
+  if (!round || round.deadline - round.startedAt !== room.settings.roundDurationMs) return false;
+  return room.players.every(
+    (player) =>
+      player.path[0] === round.startArticle &&
+      (player.finishedAfterMs === null ||
+        player.finishedAfterMs <= room.settings.roundDurationMs) &&
+      (room.phase !== 'racing' || player.roundPoints === 0),
+  );
+}
+
+/** Parse all durable bytes before they enter the core or a client view. */
+export function parseRoomSnapshot(value: unknown): RoomSnapshot {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['schemaVersion', 'room', 'memberships']) ||
+    value.schemaVersion !== ROOM_SNAPSHOT_VERSION
+  ) {
+    throw new Error('Invalid Room snapshot version.');
+  }
+  const room = parseRoom(value.room);
+  const memberships = parseMemberships(value.memberships);
+  if (!room) throw new Error('Invalid Room snapshot state.');
+  if (!memberships) throw new Error('Invalid Room snapshot Memberships.');
+  if (
+    room.players.length === 0 ||
+    room.players.some((player) => memberships[player.id] === undefined) ||
+    Object.keys(memberships).length !== room.players.length
+  ) {
+    throw new Error('Invalid Room snapshot membership invariants.');
+  }
+  return { schemaVersion: ROOM_SNAPSHOT_VERSION, room, memberships };
+}

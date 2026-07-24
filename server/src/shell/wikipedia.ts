@@ -1,5 +1,5 @@
 import type { Category, Difficulty } from '@wikispeedrun/shared';
-import { ARTICLE_POOL, CATEGORY_PAIRS } from '../game/articles.js';
+import { ARTICLE_POOL, CATEGORY_PAIRS } from '@wikispeedrun/game';
 
 // Article selection is shell territory: it involves randomness and (for random
 // difficulty) network I/O. The chosen pair enters the core as data on an intent.

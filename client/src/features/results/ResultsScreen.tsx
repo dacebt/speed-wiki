@@ -1,7 +1,7 @@
 import type { PlayerView } from '@wikispeedrun/shared';
 import { useAppState } from '../../app/store';
 import { Avatar } from '../../components/Avatar';
-import { sendIntent } from '../../lib/socket';
+import { sendIntent } from '../../lib/transport';
 import './results.css';
 
 export function ResultsScreen() {

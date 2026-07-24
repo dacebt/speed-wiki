@@ -108,3 +108,12 @@ export interface RoomSync {
 
 export const MAX_NAME_LENGTH = 20;
 export const ROOM_CODE_LENGTH = 4;
+export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+/** Validate and normalize a Room code before a transport allocates its
+    authoritative Durable Object. */
+export function normalizeRoomCode(value: string): string | null {
+  const code = value.trim().toUpperCase();
+  if (code.length !== ROOM_CODE_LENGTH) return null;
+  return [...code].every((character) => ROOM_CODE_ALPHABET.includes(character)) ? code : null;
+}

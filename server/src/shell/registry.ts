@@ -1,10 +1,14 @@
+import {
+  decide,
+  initialRoom,
+  reduce,
+  toRoomSync,
+  type CoreIntent,
+  type CoreRoom,
+  type RoomEvent,
+} from '@wikispeedrun/game';
 import { MESSAGE_EVENT, type ServerMessage } from '@wikispeedrun/shared';
 import type { Socket } from 'socket.io';
-import { decide, type CoreIntent } from '../game/decide.js';
-import type { RoomEvent } from '../game/events.js';
-import { reduce } from '../game/reduce.js';
-import { initialRoom, type CoreRoom } from '../game/state.js';
-import { toRoomSync } from '../game/view.js';
 import { pickPair } from './wikipedia.js';
 
 // The room registry: all in-memory, all effectful. Applies intents through

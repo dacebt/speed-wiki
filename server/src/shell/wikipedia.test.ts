@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { CATEGORY_PAIRS } from '../game/articles.js';
+import { CATEGORY_PAIRS } from '@wikispeedrun/game';
 import { pickPair } from './wikipedia.js';
 
 function stubRandomFetch(titles: string[]) {

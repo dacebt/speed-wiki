@@ -2,7 +2,7 @@ import type { PlayerView } from '@wikispeedrun/shared';
 import { useEffect, useRef, useState } from 'react';
 import { useAppDispatch, useAppState } from '../../app/store';
 import { Avatar } from '../../components/Avatar';
-import { sendIntent } from '../../lib/socket';
+import { sendIntent } from '../../lib/transport';
 import { ArticlePane } from './viewer/ArticlePane';
 import './race.css';
 

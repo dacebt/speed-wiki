@@ -4,3 +4,4 @@ dist/
 prototype/.playwright-mcp/
 .playwright-mcp/
 .worktrees/
+.wsd/

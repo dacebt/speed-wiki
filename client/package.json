@@ -4,13 +4,21 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "pnpm dev:legacy",
+    "dev:legacy": "vite --mode legacy",
+    "dev:worker": "vite --mode worker",
+    "build": "pnpm build:worker",
+    "build:worker": "tsc -b && vite build --mode worker",
     "build:analyze": "ANALYZE=1 vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "types:worker": "wrangler types worker-configuration.d.ts --config wrangler.jsonc",
+    "test:worker": "vitest run --config vitest.worker.config.ts",
+    "probe:worker": "node scripts/probe-worker.mjs",
+    "smoke:worker": "node scripts/smoke-worker.mjs"
   },
   "dependencies": {
+    "@wikispeedrun/game": "workspace:*",
     "@wikispeedrun/shared": "workspace:*",
     "dompurify": "^3.4.11",
     "react": "^19.2.7",
@@ -18,12 +26,17 @@
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.47.0",
+    "@cloudflare/vitest-pool-workers": "^0.18.8",
+    "@cloudflare/workers-types": "^5.20260724.1",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "playwright-core": "^1.61.1",
     "rollup-plugin-visualizer": "^7.0.1",
     "typescript": "~6.0.2",
-    "vite": "^8.1.1"
+    "vite": "^8.1.1",
+    "wrangler": "^4.114.0"
   }
 }

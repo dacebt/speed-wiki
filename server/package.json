@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@wikispeedrun/game": "workspace:*",
     "@wikispeedrun/shared": "workspace:*",
     "socket.io": "^4.8.3"
   },

@@ -25,7 +25,10 @@ export type ClientIntent =
 // Listed at runtime so the client boundary can check membership; the ErrorCode
 // type is derived from this list, keeping it the single source of truth.
 export const ERROR_CODES = [
+  'invalid-request',
   'room-not-found',
+  'room-unavailable',
+  'internal-error',
   'invalid-name',
   'invalid-cosmetics',
   'not-host',
@@ -39,6 +42,36 @@ export const ERROR_CODES = [
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** Public identity assigned by the Room authority. It is safe to render and
+    send alongside an authenticated intent, but it does not prove Membership. */
+export type PlayerId = string;
+
+/** Secret bearer credential returned once when a Membership is created. */
+export type RejoinCredential = string;
+
+export interface CreateRoomRequest {
+  playerName: string;
+}
+
+export interface CreateRoomResponse {
+  roomCode: string;
+  playerId: PlayerId;
+  rejoinCredential: RejoinCredential;
+}
+
+export interface RoomConnectMessage {
+  type: 'room/connect';
+  playerId: PlayerId;
+  rejoinCredential: RejoinCredential;
+}
+
+export interface ApiErrorResponse {
+  error: {
+    code: ErrorCode;
+    message: string;
+  };
+}
 
 export type ServerMessage =
   /** `at` is the server clock at send time — clients derive a clock offset

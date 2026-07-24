@@ -9,7 +9,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../../app/store';
 import { Avatar } from '../../components/Avatar';
-import { sendIntent } from '../../lib/socket';
+import { sendIntent, supportsInvitedJoining, supportsLobbyActions } from '../../lib/transport';
 import './lobby.css';
 
 export function LobbyScreen() {
@@ -29,25 +29,33 @@ export function LobbyScreen() {
         <h1 className="screen-title lobby__title">Lobby</h1>
         <div className="lobby__seal-wrap">
           <span className="label">Room Code</span>
-          <button
-            type="button"
-            className="seal seal--button"
-            onClick={() => codeCopy.copy(room.code)}
-            title="Copy room code"
-            aria-label={`Copy room code ${room.code}`}
-          >
-            {room.code}
-          </button>
-          <span className="flavor lobby__hint" aria-live="polite">
-            {codeCopy.copied ? 'Copied!' : '⧉ Click the seal to copy the code'}
-          </span>
-          <button
-            type="button"
-            className="btn btn--quiet lobby__copy-link"
-            onClick={() => linkCopy.copy(inviteUrl)}
-          >
-            {linkCopy.copied ? 'Copied' : 'Copy invite link'}
-          </button>
+          {supportsLobbyActions ? (
+            <>
+              <button
+                type="button"
+                className="seal seal--button"
+                onClick={() => codeCopy.copy(room.code)}
+                title="Copy room code"
+                aria-label={`Copy room code ${room.code}`}
+              >
+                {room.code}
+              </button>
+              <span className="flavor lobby__hint" aria-live="polite">
+                {codeCopy.copied ? 'Copied!' : '⧉ Click the seal to copy the code'}
+              </span>
+            </>
+          ) : (
+            <span className="seal">{room.code}</span>
+          )}
+          {supportsInvitedJoining && (
+            <button
+              type="button"
+              className="btn btn--quiet lobby__copy-link"
+              onClick={() => linkCopy.copy(inviteUrl)}
+            >
+              {linkCopy.copied ? 'Copied' : 'Copy invite link'}
+            </button>
+          )}
         </div>
       </header>
 
@@ -62,28 +70,34 @@ export function LobbyScreen() {
               player={p}
               isYou={p.id === you}
               showScore={hasScores}
-              canKick={isHost && p.id !== you}
+              canKick={supportsLobbyActions && isHost && p.id !== you}
             />
           ))}
         </ul>
       </section>
 
-      {me && <CosmeticsPicker me={me} />}
+      {supportsLobbyActions && me && <CosmeticsPicker me={me} />}
 
-      <RoundSettings settings={room.settings} isHost={isHost} />
+      {supportsLobbyActions && <RoundSettings settings={room.settings} isHost={isHost} />}
 
-      <section className="lobby__actions">
-        {isHost ? (
-          <button
-            className="btn btn--primary lobby__start"
-            onClick={() => sendIntent({ type: 'game/start' })}
-          >
-            Start Game
-          </button>
-        ) : (
-          <p className="flavor">Waiting for the host to start…</p>
-        )}
-      </section>
+      {supportsLobbyActions ? (
+        <section className="lobby__actions">
+          {isHost ? (
+            <button
+              className="btn btn--primary lobby__start"
+              onClick={() => sendIntent({ type: 'game/start' })}
+            >
+              Start Game
+            </button>
+          ) : (
+            <p className="flavor">Waiting for the host to start…</p>
+          )}
+        </section>
+      ) : (
+        <section className="panel lobby__actions" role="status">
+          <p className="flavor">Room saved. Invites and racing arrive in the next build slice.</p>
+        </section>
+      )}
     </main>
   );
 }

@@ -10,6 +10,8 @@ import { io } from 'socket.io-client';
 const URL = process.env.SMOKE_URL ?? 'http://localhost:3001';
 const INTENT_EVENT = 'intent';
 const MESSAGE_EVENT = 'message';
+const HOST_ID = 'smoke-host';
+const GUEST_ID = 'smoke-guest';
 
 let failures = 0;
 function check(cond, label) {
@@ -58,14 +60,14 @@ async function main() {
   ]);
 
   // Host creates a room.
-  host.send({ type: 'room/create', playerName: 'Host' });
+  host.send({ type: 'room/create', playerName: 'Host', playerId: HOST_ID });
   const created = await host.next(isSync, 'host room/sync');
   const code = created.room.code;
   const hostId = created.you;
   check(created.room.players.length === 1, 'room starts with host only');
 
   // Guest joins.
-  guest.send({ type: 'room/join', code, playerName: 'Guest' });
+  guest.send({ type: 'room/join', code, playerName: 'Guest', playerId: GUEST_ID });
   const joined = await guest.next(isSync, 'guest room/sync');
   const guestId = joined.you;
   check(joined.room.players.length === 2, 'guest join → 2 players');
@@ -101,7 +103,7 @@ async function main() {
   check(!afterKick.room.players.some((p) => p.id === guestId), 'host lobby no longer lists guest');
 
   // Rejoin: the kicked player can come back with the same code.
-  guest.send({ type: 'room/join', code, playerName: 'Guest' });
+  guest.send({ type: 'room/join', code, playerName: 'Guest', playerId: GUEST_ID });
   const rejoined = await guest.next(isSync, 'guest rejoin');
   check(rejoined.room.players.length === 2, 'kicked player can rejoin');
   await host.next((m) => isSync(m) && m.room.players.length === 2, 'host sees rejoin');

@@ -1,0 +1,24 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "wiki-speedrun",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-07-24",
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOMS",
+        "class_name": "RoomDurableObject",
+      },
+    ],
+  },
+  "exports": {
+    "RoomDurableObject": {
+      "type": "durable-object",
+      "storage": "sqlite",
+    },
+  },
+}

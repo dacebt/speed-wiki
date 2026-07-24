@@ -1,7 +1,11 @@
 import { MAX_NAME_LENGTH, ROOM_CODE_LENGTH } from '@wikispeedrun/shared';
 import { useEffect, useState, type FormEvent } from 'react';
 import { getPlayerId, getPlayerName, setPlayerName } from '../../lib/identity';
-import { sendIntent } from '../../lib/socket';
+import {
+  createRoom as createRoomThroughTransport,
+  sendIntent,
+  supportsInvitedJoining,
+} from '../../lib/transport';
 import './home.css';
 
 /** Read a `?code=` invite param, normalized to the room-code shape. */
@@ -13,11 +17,13 @@ function readCodeParam(): string {
 export function HomeScreen() {
   const [name, setName] = useState(getPlayerName);
   const [code, setCode] = useState(readCodeParam);
+  const [creating, setCreating] = useState(false);
 
   // Consume the invite param once: strip it so a refresh doesn't re-join, and
   // auto-join when a remembered name and a full code are both present. A dead
   // code degrades to the normal room-not-found toast; an empty name never joins.
   useEffect(() => {
+    if (!supportsInvitedJoining) return;
     const params = new URLSearchParams(window.location.search);
     if (!params.has('code')) return;
     const invited = readCodeParam();
@@ -40,10 +46,17 @@ export function HomeScreen() {
   const trimmedName = name.trim();
   const nameOk = trimmedName.length > 0 && trimmedName.length <= MAX_NAME_LENGTH;
 
-  function createRoom() {
-    if (!nameOk) return;
+  async function createRoom() {
+    if (!nameOk || creating) return;
+    setCreating(true);
     setPlayerName(trimmedName);
-    sendIntent({ type: 'room/create', playerName: trimmedName, playerId: getPlayerId() });
+    try {
+      await createRoomThroughTransport(trimmedName);
+    } catch {
+      // The transport publishes the terminal error through the normal notice path.
+    } finally {
+      setCreating(false);
+    }
   }
 
   function joinRoom(e: FormEvent) {
@@ -81,32 +94,41 @@ export function HomeScreen() {
           autoComplete="off"
         />
 
-        <button className="btn btn--primary home__create" onClick={createRoom} disabled={!nameOk}>
-          Create a Room
+        <button
+          className="btn btn--primary home__create"
+          onClick={() => void createRoom()}
+          disabled={!nameOk || creating}
+          aria-busy={creating}
+        >
+          {creating ? 'Creating Room…' : 'Create a Room'}
         </button>
 
-        <div className="home__divider">
-          <span className="flavor">— or —</span>
-        </div>
+        {supportsInvitedJoining && (
+          <>
+            <div className="home__divider">
+              <span className="flavor">— or —</span>
+            </div>
 
-        <form className="home__join" onSubmit={joinRoom}>
-          <input
-            className="input home__code"
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="CODE"
-            maxLength={ROOM_CODE_LENGTH}
-            aria-label="Room code"
-            autoComplete="off"
-          />
-          <button
-            className="btn btn--quiet"
-            type="submit"
-            disabled={!nameOk || code.trim().length !== ROOM_CODE_LENGTH}
-          >
-            Join Room
-          </button>
-        </form>
+            <form className="home__join" onSubmit={joinRoom}>
+              <input
+                className="input home__code"
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase())}
+                placeholder="CODE"
+                maxLength={ROOM_CODE_LENGTH}
+                aria-label="Room code"
+                autoComplete="off"
+              />
+              <button
+                className="btn btn--quiet"
+                type="submit"
+                disabled={!nameOk || code.trim().length !== ROOM_CODE_LENGTH}
+              >
+                Join Room
+              </button>
+            </form>
+          </>
+        )}
       </div>
 
       <footer className="flavor home__footer">Dare to know (and to click fast).</footer>

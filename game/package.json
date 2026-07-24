@@ -1,0 +1,16 @@
+{
+  "name": "@wikispeedrun/game",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@wikispeedrun/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3"
+  }
+}

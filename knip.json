@@ -1,0 +1,9 @@
+{
+  "ignore": ["client/worker-configuration.d.ts"],
+  "ignoreDependencies": ["cloudflare"],
+  "workspaces": {
+    "client": {
+      "entry": ["src/lib/transport.worker.ts", "src/**/*.test.ts", "worker/**/*.test.ts"]
+    }
+  }
+}

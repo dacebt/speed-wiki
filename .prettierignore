@@ -2,3 +2,6 @@ node_modules
 dist
 prototype
 pnpm-lock.yaml
+client/.wrangler/
+client/worker-configuration.d.ts
+.docs/investigations/

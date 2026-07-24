@@ -5,6 +5,9 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "types": ["vite/client"],
+    "paths": {
+      "@runtime-transport": ["./src/lib/transport.legacy.ts"]
+    },
     "allowArbitraryExtensions": true,
 
     /* Bundler mode */
