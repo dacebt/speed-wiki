@@ -28,6 +28,11 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function hasExactKeys(value: UnknownRecord, keys: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && actual.every((key) => keys.includes(key));
+}
+
 function isNumberOrNull(value: unknown): value is number | null {
   return value === null || typeof value === 'number';
 }
@@ -37,12 +42,31 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function isCosmetics(value: unknown): value is PlayerCosmetics {
-  return isRecord(value) && typeof value.faceId === 'string' && typeof value.hatId === 'string';
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ['faceId', 'hatId']) &&
+    typeof value.faceId === 'string' &&
+    typeof value.hatId === 'string'
+  );
 }
 
 function isPlayerView(value: unknown): value is PlayerView {
   return (
     isRecord(value) &&
+    hasExactKeys(value, [
+      'id',
+      'name',
+      'cosmetics',
+      'isHost',
+      'score',
+      'roundPoints',
+      'path',
+      'clicks',
+      'finishedRank',
+      'finishedAfterMs',
+      'gaveUp',
+      'away',
+    ]) &&
     typeof value.id === 'string' &&
     typeof value.name === 'string' &&
     isCosmetics(value.cosmetics) &&
@@ -61,6 +85,7 @@ function isPlayerView(value: unknown): value is PlayerView {
 function isRoundView(value: unknown): value is RoundView {
   return (
     isRecord(value) &&
+    hasExactKeys(value, ['roundNumber', 'startArticle', 'goalArticle', 'startedAt', 'deadline']) &&
     typeof value.roundNumber === 'number' &&
     typeof value.startArticle === 'string' &&
     typeof value.goalArticle === 'string' &&
@@ -72,6 +97,7 @@ function isRoundView(value: unknown): value is RoundView {
 function isRoomSettings(value: unknown): value is RoomSettings {
   return (
     isRecord(value) &&
+    hasExactKeys(value, ['roundDurationMs', 'countdownMs', 'difficulty', 'category']) &&
     typeof value.roundDurationMs === 'number' &&
     typeof value.countdownMs === 'number' &&
     (DIFFICULTIES as readonly string[]).includes(value.difficulty as string) &&
@@ -82,6 +108,7 @@ function isRoomSettings(value: unknown): value is RoomSettings {
 function isRoomSync(value: unknown): value is RoomSync {
   return (
     isRecord(value) &&
+    hasExactKeys(value, ['code', 'phase', 'players', 'round', 'countdownEndsAt', 'settings']) &&
     typeof value.code === 'string' &&
     (ROOM_PHASES as readonly string[]).includes(value.phase as string) &&
     Array.isArray(value.players) &&
@@ -100,13 +127,18 @@ export function parseServerMessage(raw: unknown): ServerMessage | null {
   if (!isRecord(raw)) return null;
 
   if (raw.type === 'room/sync') {
-    return typeof raw.you === 'string' && typeof raw.at === 'number' && isRoomSync(raw.room)
+    return hasExactKeys(raw, ['type', 'room', 'you', 'at']) &&
+      typeof raw.you === 'string' &&
+      typeof raw.at === 'number' &&
+      isRoomSync(raw.room)
       ? { type: 'room/sync', room: raw.room, you: raw.you, at: raw.at }
       : null;
   }
 
   if (raw.type === 'room/error') {
-    return isErrorCode(raw.code) && typeof raw.message === 'string'
+    return hasExactKeys(raw, ['type', 'code', 'message']) &&
+      isErrorCode(raw.code) &&
+      typeof raw.message === 'string'
       ? { type: 'room/error', code: raw.code, message: raw.message }
       : null;
   }

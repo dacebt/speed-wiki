@@ -5,9 +5,9 @@ import type { RoomSettings, RoomSync } from './room.js';
 // Clients send intents; the server decides; clients render what they're told.
 
 export type ClientIntent =
-  // playerId is the client-generated, localStorage-persisted identity (see
-  // client/src/lib/identity.ts). The server keys players by it, so a create or
-  // join carrying a playerId already in the room is a rejoin, not a new player.
+  // The legacy server accepts its client-generated playerId here. The Worker
+  // boundary never trusts this shape for Membership creation: it issues both
+  // public identity and secret credential itself.
   | { type: 'room/create'; playerName: string; playerId: string }
   | { type: 'room/join'; code: string; playerName: string; playerId: string }
   | { type: 'player/setCosmetics'; cosmetics: PlayerCosmetics }
@@ -28,6 +28,8 @@ export const ERROR_CODES = [
   'invalid-request',
   'room-not-found',
   'room-unavailable',
+  'invalid-membership',
+  'connection-replaced',
   'internal-error',
   'invalid-name',
   'invalid-cosmetics',
@@ -59,6 +61,18 @@ export interface CreateRoomResponse {
   playerId: PlayerId;
   rejoinCredential: RejoinCredential;
 }
+
+export interface JoinRoomRequest {
+  playerName: string;
+  /** High-entropy id for one retryable join operation. It is not a Membership
+      credential and never appears in Room state or a WebSocket attachment. */
+  attemptId: string;
+  /** Monotonic request generation within one attempt. Only a newer generation
+      may rotate an unpromoted server-issued credential. */
+  generation: number;
+}
+
+export type JoinRoomResponse = CreateRoomResponse;
 
 export interface RoomConnectMessage {
   type: 'room/connect';

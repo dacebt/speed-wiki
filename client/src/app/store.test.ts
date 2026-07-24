@@ -1,6 +1,6 @@
 import type { RoomSync } from '@wikispeedrun/shared';
 import { describe, expect, test } from 'vitest';
-import { reduceAppState, type AppState } from './storeState.js';
+import { reduceAppState, shouldClearLastRoom, type AppState } from './storeState.js';
 
 const PLAYER_ID = '1f6f49f6-30d5-4fb7-bab8-d015bf878fe8';
 
@@ -32,6 +32,28 @@ describe('transport disconnect state', () => {
     expect(next.room?.code).toBe('ABCD');
     expect(next.reconnecting).toBe(true);
     expect(next.notice).toBeNull();
+  });
+
+  test('replacement and retry exhaustion preserve the shared last-Room pointer', () => {
+    for (const code of ['connection-replaced', 'room-unavailable'] as const) {
+      const state = reduceAppState(inRoom(), {
+        type: 'socket/disconnected',
+        disconnect: { type: 'terminal', code, message: 'Connection ended.' },
+      });
+      expect(shouldClearLastRoom(state)).toBe(false);
+    }
+  });
+
+  test('authoritative Membership loss clears the last-Room pointer', () => {
+    for (const code of ['room-not-found', 'invalid-membership', 'kicked'] as const) {
+      expect(
+        shouldClearLastRoom({
+          ...inRoom(),
+          room: null,
+          notice: { code, message: 'Membership ended.' },
+        }),
+      ).toBe(true);
+    }
   });
 });
 

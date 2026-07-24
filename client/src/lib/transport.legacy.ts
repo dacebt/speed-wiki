@@ -2,7 +2,7 @@ import { INTENT_EVENT, MESSAGE_EVENT, type ClientIntent } from '@wikispeedrun/sh
 import { io, type Socket } from 'socket.io-client';
 import { getLastRoom, getPlayerId, getPlayerName } from './identity.js';
 import { parseServerMessage } from './serverMessage.js';
-import type { TransportHandlers } from './transportTypes.js';
+import type { InviteClaim, TransportHandlers } from './transportTypes.js';
 
 // The one place socket code lives on the client. Everything else sends
 // intents and receives parsed server messages.
@@ -11,6 +11,10 @@ const socket: Socket = io();
 
 export const supportsInvitedJoining = true;
 export const supportsLobbyActions = true;
+
+export function claimStoredInvite(_roomCode: string): InviteClaim {
+  return 'join';
+}
 
 // Distinguishes the first connect from a reconnect so auto-rejoin can defer to
 // an invite param on a fresh load but always fire on a dropped-then-restored link.
@@ -22,6 +26,10 @@ export function sendIntent(intent: ClientIntent): void {
 
 export async function createRoom(playerName: string): Promise<void> {
   sendIntent({ type: 'room/create', playerName, playerId: getPlayerId() });
+}
+
+export async function joinRoom(playerName: string, code: string): Promise<void> {
+  sendIntent({ type: 'room/join', code, playerName, playerId: getPlayerId() });
 }
 
 /** Re-enter the last room after a (re)connect using the persisted identity, so a

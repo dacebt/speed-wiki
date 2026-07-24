@@ -29,6 +29,15 @@ export const initialAppState: AppState = {
   notice: null,
 };
 
+export function shouldClearLastRoom(state: AppState): boolean {
+  if (state.room !== null || state.notice === null) return false;
+  return (
+    state.notice.code === 'room-not-found' ||
+    state.notice.code === 'invalid-membership' ||
+    state.notice.code === 'kicked'
+  );
+}
+
 export function reduceAppState(state: AppState, event: AppEvent): AppState {
   switch (event.type) {
     case 'socket/connected':

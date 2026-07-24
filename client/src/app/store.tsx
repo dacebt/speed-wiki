@@ -8,7 +8,13 @@ import {
 } from 'react';
 import { clearLastRoom, setLastRoom } from '../lib/identity';
 import { subscribe } from '../lib/transport';
-import { initialAppState, reduceAppState, type AppEvent, type AppState } from './storeState.js';
+import {
+  initialAppState,
+  reduceAppState,
+  shouldClearLastRoom,
+  type AppEvent,
+  type AppState,
+} from './storeState.js';
 
 // MVU: client state is a reducer over server messages and local UI events.
 // Screens derive from `room.phase`; nothing here computes game outcomes.
@@ -42,8 +48,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // join) was rejected — dead room, race underway, bad name, or a kick. Forget
   // the stored code uniformly so a reload doesn't keep re-attempting a room we
   // can't get into. ('disconnected' is a local notice, not a join rejection.)
-  const rejectedOnHome =
-    state.room === null && state.notice !== null && state.notice.code !== 'disconnected';
+  const rejectedOnHome = shouldClearLastRoom(state);
   useEffect(() => {
     if (rejectedOnHome) clearLastRoom();
   }, [rejectedOnHome]);

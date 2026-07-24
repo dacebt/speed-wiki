@@ -5,7 +5,9 @@ const baseUrl = process.env.BASE_URL ?? 'http://127.0.0.1:5173';
 const browser = await launchInstalledBrowser();
 
 try {
-  const page = await browser.newPage();
+  const hostContext = await browser.newContext();
+  const guestContext = await browser.newContext();
+  const page = await hostContext.newPage();
   let postCount = 0;
   let releaseCreation;
   const creationGate = new Promise((resolve) => {
@@ -51,7 +53,7 @@ try {
   ) {
     throw new Error('Lobby rendered before its Room membership was persisted.');
   }
-  await page.getByRole('status').getByText('Room saved.', { exact: false }).waitFor();
+  await page.getByRole('status').getByText('Share the invite link', { exact: false }).waitFor();
 
   const players = page.locator('.lobby__player');
   if ((await players.count()) !== 1) throw new Error('Rendered lobby did not contain one player.');
@@ -64,21 +66,82 @@ try {
   }
   if (
     (await page.getByRole('button', { name: 'Start Game' }).count()) !== 0 ||
-    (await page.getByRole('button', { name: /copy/i }).count()) !== 0 ||
     (await page.getByText('Choose your portrait', { exact: true }).count()) !== 0 ||
     (await page.getByText('Round settings', { exact: true }).count()) !== 0
   ) {
     throw new Error('Worker lobby exposed actions that are not implemented yet.');
   }
+  if ((await page.getByRole('button', { name: 'Copy invite link' }).count()) !== 1) {
+    throw new Error('Worker lobby did not expose its invite path.');
+  }
+
+  const guestPage = await guestContext.newPage();
+  let guestSocket;
+  await guestPage.routeWebSocket('**/websocket', (socket) => {
+    guestSocket = socket;
+    socket.connectToServer();
+  });
+  await guestPage.goto(`${baseUrl}/?code=${roomCode}`, { waitUntil: 'domcontentloaded' });
+  await guestPage.getByLabel('Your name').fill('Invited Guest');
+  await guestPage.getByRole('button', { name: 'Join Room' }).click();
+  await guestPage.getByRole('heading', { name: 'Lobby' }).waitFor();
+  if (new URL(guestPage.url()).searchParams.has('code')) {
+    throw new Error('Guest invite query remained after joining.');
+  }
+  await waitUntil(
+    async () => (await page.locator('.lobby__player').count()) === 2,
+    'host join sync',
+  );
+  await waitUntil(
+    async () => (await guestPage.locator('.lobby__player').count()) === 2,
+    'guest join sync',
+  );
+
+  const guestMembership = await guestPage.evaluate((code) => {
+    const raw = localStorage.getItem(`wikispeedrun.room.${code}.membership`);
+    return raw === null ? null : JSON.parse(raw);
+  }, roomCode);
+  if (
+    guestMembership === null ||
+    typeof guestMembership.playerId !== 'string' ||
+    guestMembership.playerId === storedMembership.playerId
+  ) {
+    throw new Error('Invited browser did not receive a distinct persisted Player identity.');
+  }
+
+  if (!guestSocket) throw new Error('Guest WebSocket was not observed by the browser probe.');
+  await guestSocket.close({ code: 1012, reason: 'Smoke network drop.' });
+  await guestPage.getByRole('status').getByText('Reconnecting…', { exact: true }).waitFor();
+  await guestPage
+    .getByRole('status')
+    .getByText('Reconnecting…', { exact: true })
+    .waitFor({ state: 'detached' });
+  await waitUntil(
+    async () => (await guestPage.locator('.lobby__player').count()) === 2,
+    'guest reconnect sync',
+  );
+  const guestMembershipAfterReconnect = await guestPage.evaluate((code) => {
+    const raw = localStorage.getItem(`wikispeedrun.room.${code}.membership`);
+    return raw === null ? null : JSON.parse(raw);
+  }, roomCode);
+  const identitiesPreserved =
+    guestMembershipAfterReconnect?.playerId === guestMembership.playerId &&
+    guestMembershipAfterReconnect?.rejoinCredential === guestMembership.rejoinCredential;
+  if (!identitiesPreserved) {
+    throw new Error('Guest reconnect changed the Room Membership identity.');
+  }
 
   console.log(
     JSON.stringify({
       phase: 'lobby',
-      players: 1,
+      players: 2,
       host: true,
       roomCode,
       createPosts: postCount,
       membershipPersisted: true,
+      joined: true,
+      reconnected: true,
+      identitiesPreserved,
       surface: 'react',
     }),
   );
@@ -124,7 +187,7 @@ async function launchInstalledBrowser() {
 async function waitUntil(predicate, label) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
-    if (predicate()) return;
+    if (await predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`${label} did not occur.`);

@@ -13,3 +13,20 @@ export interface TransportHandlers {
   onConnect: () => void;
   onDisconnect: (disconnect: TransportDisconnect) => void;
 }
+
+export interface RoomMembership {
+  roomCode: string;
+  playerId: string;
+  rejoinCredential: string;
+}
+
+export type InviteClaim = 'join' | 'resume' | 'resume-with-query';
+
+export class TransportConnectionError extends Error {
+  readonly code: ErrorCode;
+
+  constructor(code: ErrorCode, message: string) {
+    super(message);
+    this.code = code;
+  }
+}

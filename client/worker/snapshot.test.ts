@@ -4,6 +4,8 @@ import { ROOM_SNAPSHOT_VERSION, parseRoomSnapshot, type RoomSnapshot } from './s
 
 const HOST_ID = '1f6f49f6-30d5-4fb7-bab8-d015bf878fe8';
 const OTHER_ID = 'c61ecdb5-0476-4503-953b-04567336f436';
+const ATTEMPT_ID = '9e2a5f17-b57f-4ee9-9a7d-b4ae8f2dd1b2';
+const OTHER_ATTEMPT_ID = '2297ac68-da58-4cad-94ae-e5f863beab60';
 const DIGEST = 'a'.repeat(64);
 
 describe('durable Room snapshot validation', () => {
@@ -71,6 +73,73 @@ describe('durable Room snapshot validation', () => {
 
   test('accepts the persisted one-host lobby', () => {
     expect(parseRoomSnapshot(validSnapshot())).toEqual(validSnapshot());
+  });
+
+  test('accepts an exact pending join reservation outside visible Room state', () => {
+    const snapshot = validSnapshot();
+    snapshot.joinAttempts[ATTEMPT_ID] = {
+      state: 'pending',
+      playerId: OTHER_ID,
+      playerName: 'Guest',
+      credentialDigest: DIGEST,
+      generation: 0,
+    };
+    expect(parseRoomSnapshot(snapshot)).toEqual(snapshot);
+  });
+
+  test('rejects a pending join reservation that already has visible authority', () => {
+    const snapshot = validSnapshot();
+    snapshot.joinAttempts[ATTEMPT_ID] = {
+      state: 'pending',
+      playerId: HOST_ID,
+      playerName: 'Ada',
+      credentialDigest: DIGEST,
+      generation: 0,
+    };
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('Invalid pending join attempt.');
+  });
+
+  test('rejects a pending join reservation with an invalid generation', () => {
+    const snapshot = validSnapshot();
+    snapshot.joinAttempts[ATTEMPT_ID] = {
+      state: 'pending',
+      playerId: OTHER_ID,
+      playerName: 'Guest',
+      credentialDigest: DIGEST,
+      generation: -1,
+    };
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('Invalid Room snapshot join attempts.');
+  });
+
+  test('rejects a promoted join attempt without its Player and Membership', () => {
+    const snapshot = validSnapshot();
+    snapshot.joinAttempts[ATTEMPT_ID] = { state: 'promoted', playerId: OTHER_ID };
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('Invalid promoted join attempt.');
+  });
+
+  test('rejects two pending attempts that alias one reserved Player ID', () => {
+    const snapshot = validSnapshot();
+    const pending = {
+      state: 'pending' as const,
+      playerId: OTHER_ID,
+      playerName: 'Guest',
+      credentialDigest: DIGEST,
+      generation: 0,
+    };
+    snapshot.joinAttempts[ATTEMPT_ID] = pending;
+    snapshot.joinAttempts[OTHER_ATTEMPT_ID] = { ...pending, generation: 1 };
+    expect(() => parseRoomSnapshot(snapshot)).toThrow(
+      'Invalid join attempt Player identity aliases.',
+    );
+  });
+
+  test('rejects two promoted attempts that alias one Membership', () => {
+    const snapshot = validSnapshot();
+    snapshot.joinAttempts[ATTEMPT_ID] = { state: 'promoted', playerId: HOST_ID };
+    snapshot.joinAttempts[OTHER_ATTEMPT_ID] = { state: 'promoted', playerId: HOST_ID };
+    expect(() => parseRoomSnapshot(snapshot)).toThrow(
+      'Invalid join attempt Player identity aliases.',
+    );
   });
 
   test.each([
@@ -177,6 +246,7 @@ function validSnapshot(): RoomSnapshot {
     schemaVersion: ROOM_SNAPSHOT_VERSION,
     room,
     memberships: { [HOST_ID]: { credentialDigest: DIGEST } },
+    joinAttempts: {},
   };
 }
 

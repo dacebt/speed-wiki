@@ -95,7 +95,9 @@ export function LobbyScreen() {
         </section>
       ) : (
         <section className="panel lobby__actions" role="status">
-          <p className="flavor">Room saved. Invites and racing arrive in the next build slice.</p>
+          <p className="flavor">
+            Room saved. Share the invite link; racing arrives in the next build slice.
+          </p>
         </section>
       )}
     </main>

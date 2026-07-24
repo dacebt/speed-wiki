@@ -1,59 +1,123 @@
 import {
-  ERROR_CODES,
-  type ApiErrorResponse,
+  normalizeRoomCode,
   type ClientIntent,
-  type CreateRoomResponse,
   type ErrorCode,
   type RoomConnectMessage,
   type ServerMessage,
 } from '@wikispeedrun/shared';
-import { normalizeRoomCode } from '@wikispeedrun/shared';
-import { parseServerMessage } from './serverMessage.js';
-import type { TransportHandlers } from './transportTypes.js';
+import { getLastRoom, setLastRoom } from './identity.js';
+import {
+  createRoomMembership,
+  joinRoomMembership,
+  parseRoomMembershipResponse,
+  RoomRequestError,
+} from './roomApi.js';
+import {
+  loadRoomMembership,
+  persistRoomMembership,
+  type StoredMembershipResult,
+} from './roomMembership.js';
+import { closeFailure, delay, parseSocketMessage } from './transportHelpers.js';
+import {
+  TransportConnectionError,
+  type InviteClaim,
+  type RoomMembership,
+  type TransportDisconnect,
+  type TransportHandlers,
+} from './transportTypes.js';
 
-export const supportsInvitedJoining = false;
+export const supportsInvitedJoining = true;
 export const supportsLobbyActions = false;
+export { parseRoomMembershipResponse as parseCreateRoomResponse };
 
-const handlers = new Set<TransportHandlers>();
-let connection: WebSocket | null = null;
-let creationInFlight: Promise<void> | null = null;
-const ROOM_CREATION_DEADLINE_MS = 10_000;
+let claimedInviteMembership: RoomMembership | null = null;
+
+export function claimStoredInvite(codeInput: string): InviteClaim {
+  const code = normalizeRoomCode(codeInput);
+  if (code === null) return 'join';
+  const loaded = loadRoomMembership(code);
+  if (!loaded.ok) return 'join';
+  claimedInviteMembership = loaded.membership;
+  try {
+    setLastRoom(code);
+    return 'resume';
+  } catch {
+    return 'resume-with-query';
+  }
+}
+
 const FIRST_SYNC_DEADLINE_MS = 10_000;
+const RECONNECT_ATTEMPTS = 3;
+const handlers = new Set<TransportHandlers>();
+const intentionalClosures = new WeakSet<WebSocket>();
+
+let connection: WebSocket | null = null;
+let activeMembership: RoomMembership | null = null;
+let membershipOperation: Promise<void> | null = null;
+let reconnectOperation: ReconnectOperation | null = null;
+let currentAttempt: ConnectionAttempt | null = null;
+let sessionVersion = 0;
+let initialResumeScheduled = false;
+let initialResumeAttempted = false;
+
+interface ReconnectOperation {
+  membership: RoomMembership;
+  sessionVersion: number;
+  cancelled: boolean;
+  promise: Promise<void> | null;
+}
+
+interface ConnectionAttempt {
+  membership: RoomMembership;
+  sessionVersion: number;
+  socket: WebSocket;
+  cancelled: boolean;
+  cancel: (reason: string) => void;
+}
+
+class ConnectionAttemptCancelled extends Error {}
 
 export function createRoom(playerName: string): Promise<void> {
-  if (creationInFlight) return creationInFlight;
-  const attempt = createRoomOnce(playerName);
+  return runMembershipOperation(() => createRoomMembership(playerName));
+}
+
+export function joinRoom(playerName: string, codeInput: string): Promise<void> {
+  const code = normalizeRoomCode(codeInput);
+  if (!code) return failOperation('room-not-found', 'No room found with that code.');
+  return runMembershipOperation(() => joinRoomMembership(playerName, code));
+}
+
+function runMembershipOperation(request: () => Promise<RoomMembership>): Promise<void> {
+  if (membershipOperation) return membershipOperation;
+  const attempt = request()
+    .then((membership) => replaceMembership(membership))
+    .catch((error: unknown) => {
+      const failure =
+        error instanceof RoomRequestError || error instanceof TransportConnectionError
+          ? error
+          : new TransportConnectionError('internal-error', 'The Room connection failed.');
+      terminate(failure.code, failure.message);
+      throw failure;
+    });
   const shared = attempt.finally(() => {
-    if (creationInFlight === shared) creationInFlight = null;
+    if (membershipOperation === shared) membershipOperation = null;
   });
-  creationInFlight = shared;
+  membershipOperation = shared;
   return shared;
 }
 
-async function createRoomOnce(playerName: string): Promise<void> {
-  let result: { response: Response; raw: unknown };
+async function replaceMembership(membership: RoomMembership): Promise<void> {
   try {
-    result = await requestRoom(playerName);
-  } catch (error) {
-    const message =
-      error instanceof RoomCreationDeadlineError
-        ? 'Room creation timed out.'
-        : 'The Room service could not be reached.';
-    return failCreation('room-unavailable', message);
+    persistRoomMembership(membership);
+    setLastRoom(membership.roomCode);
+  } catch {
+    throw new TransportConnectionError('internal-error', 'The Room membership could not be saved.');
   }
-
-  if (!result.response.ok) {
-    const error = parseApiError(result.raw);
-    return failCreation(
-      error?.error.code ?? 'internal-error',
-      error?.error.message ?? 'The Room service returned an invalid error.',
-    );
-  }
-  const created = parseCreateRoomResponse(result.raw);
-  if (!created) {
-    return failCreation('internal-error', 'The Room service returned an invalid creation result.');
-  }
-  await connect(created);
+  const version = ++sessionVersion;
+  cancelReconnect('Replaced by a new Room Membership.');
+  closeCurrent('Replaced by a new Room Membership.');
+  activeMembership = membership;
+  await openMembership(membership, version, null);
 }
 
 export function sendIntent(intent: ClientIntent): void {
@@ -61,50 +125,129 @@ export function sendIntent(intent: ClientIntent): void {
     connection.send(JSON.stringify(intent));
     return;
   }
-  notifyError('room-unavailable', 'The Room connection is not ready.');
+  notifyMessage({
+    type: 'room/error',
+    code: 'room-unavailable',
+    message: 'The Room connection is not ready.',
+  });
 }
 
 export function subscribe(nextHandlers: TransportHandlers): () => void {
   handlers.add(nextHandlers);
-  return () => handlers.delete(nextHandlers);
+  scheduleInitialResume();
+  return () => {
+    handlers.delete(nextHandlers);
+    queueMicrotask(() => {
+      if (handlers.size !== 0) return;
+      sessionVersion += 1;
+      cancelReconnect('Room transport has no subscribers.');
+      closeCurrent('Room transport has no subscribers.');
+      activeMembership = null;
+    });
+  };
 }
 
-function connect(membership: CreateRoomResponse): Promise<void> {
+function scheduleInitialResume(): void {
+  if (initialResumeScheduled || initialResumeAttempted) return;
+  initialResumeScheduled = true;
+  queueMicrotask(() => {
+    initialResumeScheduled = false;
+    if (initialResumeAttempted || handlers.size === 0 || membershipOperation) return;
+    initialResumeAttempted = true;
+    const claimedMembership = claimedInviteMembership;
+    claimedInviteMembership = null;
+    if (claimedMembership) {
+      const version = ++sessionVersion;
+      activeMembership = claimedMembership;
+      beginReconnect(claimedMembership, false, version);
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const inviteCode = normalizeRoomCode(params.get('code') ?? '');
+    const roomCode = inviteCode ?? getLastRoom();
+    if (!roomCode) return;
+    const loaded = loadRoomMembership(roomCode);
+    if (inviteCode && !loaded.ok) return;
+    if (!loaded.ok) {
+      terminateStoredMembershipFailure(loaded);
+      return;
+    }
+    const version = ++sessionVersion;
+    activeMembership = loaded.membership;
+    beginReconnect(loaded.membership, false, version);
+  });
+}
+
+function openMembership(
+  membership: RoomMembership,
+  version: number,
+  reconnect: ReconnectOperation | null,
+): Promise<void> {
   const url = new URL(`/api/rooms/${membership.roomCode}/websocket`, window.location.href);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(url);
-  const replaced = connection;
   connection = socket;
-  replaced?.close(1000, 'Replaced by a new Room connection.');
 
   return new Promise((resolve, reject) => {
-    let settled = false;
-    const firstSyncDeadline = setTimeout(() => {
-      failBeforeSync('The Room lobby did not become ready in time.');
-    }, FIRST_SYNC_DEADLINE_MS);
+    let synced = false;
+    let finished = false;
+    const attempt: ConnectionAttempt = {
+      membership,
+      sessionVersion: version,
+      socket,
+      cancelled: false,
+      cancel(reason: string): void {
+        if (attempt.cancelled) return;
+        attempt.cancelled = true;
+        if (currentAttempt === attempt) currentAttempt = null;
+        if (connection === socket) connection = null;
+        closeIntentionally(socket, reason);
+        if (!finished) {
+          finished = true;
+          clearTimeout(deadline);
+          reject(new ConnectionAttemptCancelled(reason));
+        }
+      },
+    };
+    currentAttempt = attempt;
+    const deadline = setTimeout(
+      () => failAttempt('room-unavailable', 'The Room lobby did not become ready in time.'),
+      FIRST_SYNC_DEADLINE_MS,
+    );
 
-    const succeed = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(firstSyncDeadline);
-      resolve();
-    };
-    const failBeforeSync = (
-      message: string,
-      code: ErrorCode | 'disconnected' = 'room-unavailable',
-    ) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(firstSyncDeadline);
+    function ownsAttempt(): boolean {
+      return (
+        !attempt.cancelled &&
+        currentAttempt === attempt &&
+        connection === socket &&
+        sessionVersion === version &&
+        activeMembership === membership &&
+        (synced || reconnect === null || (reconnectOperation === reconnect && !reconnect.cancelled))
+      );
+    }
+
+    function finishFailure(code: ErrorCode, message: string): void {
+      if (finished) return;
+      finished = true;
+      clearTimeout(deadline);
+      attempt.cancelled = true;
+      if (currentAttempt === attempt) currentAttempt = null;
       if (connection === socket) connection = null;
-      notifyDisconnect({ type: 'terminal', code, message });
-      socket.close(1000, 'Room creation failed.');
-      reject(new Error(message));
-    };
+      closeIntentionally(socket, 'Room connection attempt ended.');
+      reject(new TransportConnectionError(code, message));
+    }
+
+    function failAttempt(code: ErrorCode, message: string): void {
+      if (synced) {
+        terminateOwned(version, membership, code, message);
+        return;
+      }
+      finishFailure(code, message);
+    }
 
     socket.addEventListener('open', () => {
-      if (connection !== socket) return;
-      for (const listener of handlers) listener.onConnect();
+      if (!ownsAttempt()) return;
+      notifyConnect();
       socket.send(
         JSON.stringify({
           type: 'room/connect',
@@ -114,161 +257,189 @@ function connect(membership: CreateRoomResponse): Promise<void> {
       );
     });
     socket.addEventListener('message', (event) => {
+      if (!ownsAttempt()) return;
       const message = parseSocketMessage(event.data);
       if (!message) {
-        if (!settled) failBeforeSync('The Room service sent an invalid lobby response.');
+        failAttempt('internal-error', 'The Room service sent an invalid lobby response.');
         return;
       }
-      if (
-        message.type === 'room/sync' &&
-        message.you === membership.playerId &&
-        message.room.code === membership.roomCode
-      ) {
-        if (!settled) {
-          try {
-            persistMembership(membership);
-          } catch {
-            failBeforeSync('The Room membership could not be saved.', 'internal-error');
-            return;
+      if (message.type === 'room/error') {
+        if (message.code === 'connection-replaced') {
+          if (synced) {
+            terminateOwned(version, membership, message.code, message.message);
+          } else {
+            finishFailure(message.code, message.message);
           }
+          return;
         }
-        notifyMessage(message);
-        succeed();
-      } else if (message.type === 'room/error') {
-        failBeforeSync(message.message, message.code);
-      } else if (!settled) {
-        failBeforeSync('The Room service sent an unexpected lobby response.');
-      } else {
-        notifyMessage(message);
+        failAttempt(message.code, message.message);
+        return;
+      }
+      if (message.you !== membership.playerId || message.room.code !== membership.roomCode) {
+        failAttempt('invalid-membership', 'The Room service returned the wrong Membership.');
+        return;
+      }
+      if (!ownsAttempt()) return;
+      synced = true;
+      activeMembership = membership;
+      if (reconnect !== null && reconnectOperation === reconnect) {
+        reconnectOperation = null;
+      }
+      notifyMessage(message);
+      if (!finished) {
+        finished = true;
+        clearTimeout(deadline);
+        resolve();
       }
     });
-    socket.addEventListener('close', () => {
-      if (connection !== socket) return;
-      connection = null;
-      if (!settled) {
-        failBeforeSync('The Room connection closed before the lobby was ready.');
+    socket.addEventListener('close', (event) => {
+      if (intentionalClosures.has(socket) || !ownsAttempt()) return;
+      currentAttempt = null;
+      if (connection === socket) connection = null;
+      const failure = closeFailure(event);
+      if (!synced) {
+        finishFailure(failure.code, failure.message);
         return;
       }
-      notifyDisconnect({
-        type: 'terminal',
-        code: 'room-unavailable',
-        message: 'The Room connection was lost. Create a new Room to continue.',
-      });
+      if (failure.code === 'connection-replaced' || failure.code === 'invalid-membership') {
+        terminateOwned(version, membership, failure.code, failure.message);
+        return;
+      }
+      beginReconnect(membership, true, version);
     });
     socket.addEventListener('error', () => {
-      if (!settled) {
-        failBeforeSync('The Room connection failed.');
-        return;
-      }
-      if (connection !== socket) return;
-      connection = null;
-      notifyDisconnect({
-        type: 'terminal',
-        code: 'room-unavailable',
-        message: 'The Room connection failed. Create a new Room to continue.',
-      });
-      socket.close(1011, 'Room connection failed.');
+      if (!ownsAttempt()) return;
+      if (!synced) finishFailure('room-unavailable', 'The Room connection failed.');
     });
   });
 }
 
-async function requestRoom(playerName: string): Promise<{ response: Response; raw: unknown }> {
-  const controller = new AbortController();
-  let deadline: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<never>((_resolve, reject) => {
-    deadline = setTimeout(() => {
-      controller.abort();
-      reject(new RoomCreationDeadlineError());
-    }, ROOM_CREATION_DEADLINE_MS);
+function beginReconnect(membership: RoomMembership, announce: boolean, version: number): void {
+  if (reconnectOperation || activeMembership !== membership || sessionVersion !== version) {
+    return;
+  }
+  if (announce) notifyDisconnect({ type: 'reconnecting' });
+  const operation: ReconnectOperation = {
+    membership,
+    sessionVersion: version,
+    cancelled: false,
+    promise: null,
+  };
+  reconnectOperation = operation;
+  operation.promise = reconnect(operation).finally(() => {
+    if (reconnectOperation === operation) reconnectOperation = null;
   });
-  try {
-    return await Promise.race([
-      fetch('/api/rooms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerName }),
-        signal: controller.signal,
-      }).then(async (response) => ({ response, raw: await response.json().catch(() => null) })),
-      timedOut,
-    ]);
-  } finally {
-    clearTimeout(deadline);
-  }
 }
 
-class RoomCreationDeadlineError extends Error {}
-
-function parseSocketMessage(raw: unknown): ServerMessage | null {
-  if (typeof raw !== 'string') return null;
-  try {
-    return parseServerMessage(JSON.parse(raw));
-  } catch {
-    return null;
-  }
-}
-
-export function parseCreateRoomResponse(value: unknown): CreateRoomResponse | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  const normalizedCode =
-    typeof record.roomCode === 'string' ? normalizeRoomCode(record.roomCode) : null;
-  return Object.keys(record).length === 3 &&
-    normalizedCode !== null &&
-    normalizedCode === record.roomCode &&
-    typeof record.playerId === 'string' &&
-    isUuid(record.playerId) &&
-    typeof record.rejoinCredential === 'string' &&
-    /^[A-Za-z0-9_-]{43}$/.test(record.rejoinCredential)
-    ? {
-        roomCode: normalizedCode,
-        playerId: record.playerId,
-        rejoinCredential: record.rejoinCredential,
+async function reconnect(operation: ReconnectOperation): Promise<void> {
+  const { membership, sessionVersion: version } = operation;
+  for (let attempt = 0; attempt < RECONNECT_ATTEMPTS; attempt += 1) {
+    if (!ownsReconnect(operation)) return;
+    if (attempt > 0) {
+      await delay(attempt * 250);
+      if (!ownsReconnect(operation)) return;
+    }
+    try {
+      await openMembership(membership, version, operation);
+      if (!ownsReconnect(operation)) return;
+      return;
+    } catch (error) {
+      if (error instanceof ConnectionAttemptCancelled || !ownsReconnect(operation)) return;
+      if (
+        error instanceof TransportConnectionError &&
+        (error.code === 'invalid-membership' || error.code === 'connection-replaced')
+      ) {
+        terminateOwned(version, membership, error.code, error.message);
+        return;
       }
-    : null;
-}
-
-function parseApiError(value: unknown): ApiErrorResponse | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  const error = (value as Record<string, unknown>).error;
-  if (typeof error !== 'object' || error === null || Array.isArray(error)) return null;
-  const record = error as Record<string, unknown>;
-  if (
-    typeof record.code !== 'string' ||
-    !(ERROR_CODES as readonly string[]).includes(record.code) ||
-    typeof record.message !== 'string'
-  ) {
-    return null;
+    }
   }
-  return { error: { code: record.code as ErrorCode, message: record.message } };
+  if (ownsReconnect(operation)) {
+    terminateOwned(
+      version,
+      membership,
+      'room-unavailable',
+      'The Room connection could not be restored.',
+    );
+  }
 }
 
-function persistMembership(membership: CreateRoomResponse): void {
-  localStorage.setItem(
-    `wikispeedrun.room.${membership.roomCode}.membership`,
-    JSON.stringify({
-      playerId: membership.playerId,
-      rejoinCredential: membership.rejoinCredential,
-    }),
+function ownsReconnect(operation: ReconnectOperation): boolean {
+  return (
+    reconnectOperation === operation &&
+    !operation.cancelled &&
+    sessionVersion === operation.sessionVersion &&
+    activeMembership === operation.membership
   );
 }
 
-function notifyError(code: ErrorCode, message: string): void {
-  notifyMessage({ type: 'room/error', code, message });
+function terminateStoredMembershipFailure(result: Exclude<StoredMembershipResult, { ok: true }>) {
+  const message =
+    result.reason === 'storage-failed'
+      ? 'The saved Room Membership could not be read.'
+      : 'The saved Room Membership is missing or invalid.';
+  terminate('invalid-membership', message);
 }
 
-function failCreation(code: ErrorCode, message: string): never {
-  notifyError(code, message);
-  throw new Error(message);
+function terminate(code: ErrorCode, message: string): void {
+  sessionVersion += 1;
+  cancelReconnect('Room connection ended.');
+  activeMembership = null;
+  closeCurrent('Room connection ended.');
+  notifyDisconnect({ type: 'terminal', code, message });
+}
+
+function terminateOwned(
+  version: number,
+  membership: RoomMembership,
+  code: ErrorCode,
+  message: string,
+): void {
+  if (sessionVersion !== version || activeMembership !== membership) return;
+  terminate(code, message);
+}
+
+function cancelReconnect(reason: string): void {
+  const operation = reconnectOperation;
+  if (!operation) return;
+  operation.cancelled = true;
+  reconnectOperation = null;
+  if (
+    currentAttempt?.sessionVersion === operation.sessionVersion &&
+    currentAttempt.membership === operation.membership
+  ) {
+    currentAttempt.cancel(reason);
+  }
+}
+
+function closeCurrent(reason: string): void {
+  if (currentAttempt) {
+    currentAttempt.cancel(reason);
+    return;
+  }
+  const socket = connection;
+  connection = null;
+  if (socket) closeIntentionally(socket, reason);
+}
+
+function closeIntentionally(socket: WebSocket, reason: string): void {
+  intentionalClosures.add(socket);
+  socket.close(1000, reason);
+}
+
+function failOperation(code: ErrorCode, message: string): Promise<never> {
+  terminate(code, message);
+  return Promise.reject(new RoomRequestError(code, message));
 }
 
 function notifyMessage(message: ServerMessage): void {
   for (const listener of handlers) listener.onMessage(message);
 }
 
-function notifyDisconnect(disconnect: Parameters<TransportHandlers['onDisconnect']>[0]): void {
-  for (const listener of handlers) listener.onDisconnect(disconnect);
+function notifyConnect(): void {
+  for (const listener of handlers) listener.onConnect();
 }
 
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+function notifyDisconnect(disconnect: TransportDisconnect): void {
+  for (const listener of handlers) listener.onDisconnect(disconnect);
 }

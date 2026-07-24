@@ -1,8 +1,6 @@
-// The client's stable, unauthenticated identity. A playerId is generated once
-// and persisted so a refresh or reconnect keeps your seat: the server keys
-// players by it (see shared/src/messages.ts). The name and last-room code are
-// persisted alongside it so a reconnect can re-send room/join without prompting.
-// This is a convenience id, not a credential.
+// The legacy runtime's client-generated identity. The Worker runtime instead
+// persists a Room-scoped Membership issued by the Room authority. The shared
+// player name and last-Room code support both transports.
 
 const PLAYER_ID_KEY = 'wikispeedrun.playerId';
 const PLAYER_NAME_KEY = 'wikispeedrun.playerName';

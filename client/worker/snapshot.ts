@@ -11,17 +11,31 @@ import {
   type RoundView,
 } from '@wikispeedrun/shared';
 
-export const ROOM_SNAPSHOT_VERSION = 1;
+export const ROOM_SNAPSHOT_VERSION = 3;
 export const ROOM_STORAGE_KEY = 'room';
 
 interface Membership {
   credentialDigest: string;
 }
 
+type JoinAttempt =
+  | {
+      state: 'pending';
+      playerId: string;
+      playerName: string;
+      credentialDigest: string;
+      generation: number;
+    }
+  | {
+      state: 'promoted';
+      playerId: string;
+    };
+
 export interface RoomSnapshot {
   schemaVersion: typeof ROOM_SNAPSHOT_VERSION;
   room: CoreRoom;
   memberships: Record<string, Membership>;
+  joinAttempts: Record<string, JoinAttempt>;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -234,6 +248,53 @@ function parseMemberships(value: unknown): Record<string, Membership> | null {
   return memberships;
 }
 
+function parseJoinAttempts(value: unknown): Record<string, JoinAttempt> | null {
+  if (!isRecord(value)) return null;
+  const attempts: Record<string, JoinAttempt> = {};
+  for (const [attemptId, attempt] of Object.entries(value)) {
+    if (!isUuid(attemptId) || !isRecord(attempt)) return null;
+    if (
+      hasExactKeys(attempt, ['state', 'playerId']) &&
+      attempt.state === 'promoted' &&
+      typeof attempt.playerId === 'string' &&
+      isUuid(attempt.playerId)
+    ) {
+      attempts[attemptId] = { state: 'promoted', playerId: attempt.playerId };
+      continue;
+    }
+    if (
+      hasExactKeys(attempt, [
+        'state',
+        'playerId',
+        'playerName',
+        'credentialDigest',
+        'generation',
+      ]) &&
+      attempt.state === 'pending' &&
+      typeof attempt.playerId === 'string' &&
+      isUuid(attempt.playerId) &&
+      typeof attempt.playerName === 'string' &&
+      attempt.playerName.trim().length > 0 &&
+      attempt.playerName === attempt.playerName.trim() &&
+      attempt.playerName.length <= MAX_NAME_LENGTH &&
+      typeof attempt.credentialDigest === 'string' &&
+      /^[a-f0-9]{64}$/.test(attempt.credentialDigest) &&
+      isNonNegativeInteger(attempt.generation)
+    ) {
+      attempts[attemptId] = {
+        state: 'pending',
+        playerId: attempt.playerId,
+        playerName: attempt.playerName,
+        credentialDigest: attempt.credentialDigest,
+        generation: attempt.generation,
+      };
+      continue;
+    }
+    return null;
+  }
+  return attempts;
+}
+
 function isCoherentRoom(room: CoreRoom): boolean {
   const playerIds = room.players.map((player) => player.id);
   if (
@@ -290,15 +351,17 @@ function isCoherentActiveRound(room: CoreRoom): boolean {
 export function parseRoomSnapshot(value: unknown): RoomSnapshot {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ['schemaVersion', 'room', 'memberships']) ||
+    !hasExactKeys(value, ['schemaVersion', 'room', 'memberships', 'joinAttempts']) ||
     value.schemaVersion !== ROOM_SNAPSHOT_VERSION
   ) {
     throw new Error('Invalid Room snapshot version.');
   }
   const room = parseRoom(value.room);
   const memberships = parseMemberships(value.memberships);
+  const joinAttempts = parseJoinAttempts(value.joinAttempts);
   if (!room) throw new Error('Invalid Room snapshot state.');
   if (!memberships) throw new Error('Invalid Room snapshot Memberships.');
+  if (!joinAttempts) throw new Error('Invalid Room snapshot join attempts.');
   if (
     room.players.length === 0 ||
     room.players.some((player) => memberships[player.id] === undefined) ||
@@ -306,5 +369,19 @@ export function parseRoomSnapshot(value: unknown): RoomSnapshot {
   ) {
     throw new Error('Invalid Room snapshot membership invariants.');
   }
-  return { schemaVersion: ROOM_SNAPSHOT_VERSION, room, memberships };
+  for (const attempt of Object.values(joinAttempts)) {
+    const player = room.players.find((candidate) => candidate.id === attempt.playerId);
+    if (attempt.state === 'pending') {
+      if (player || memberships[attempt.playerId] !== undefined) {
+        throw new Error('Invalid pending join attempt.');
+      }
+    } else if (!player || memberships[attempt.playerId] === undefined) {
+      throw new Error('Invalid promoted join attempt.');
+    }
+  }
+  const attemptedPlayerIds = Object.values(joinAttempts).map((attempt) => attempt.playerId);
+  if (new Set(attemptedPlayerIds).size !== attemptedPlayerIds.length) {
+    throw new Error('Invalid join attempt Player identity aliases.');
+  }
+  return { schemaVersion: ROOM_SNAPSHOT_VERSION, room, memberships, joinAttempts };
 }

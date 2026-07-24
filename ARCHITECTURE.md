@@ -38,9 +38,22 @@ Vite serves the same SPA with a native-WebSocket transport, a same-origin Worker
 allocates a named Room Durable Object, and that object validates and persists a
 versioned Room snapshot before sending a full sync. The runtime is selected at build
 time, so Socket.IO is absent from the Worker browser bundle and neither shell routes
-through the other. The Worker path currently covers protected Room creation and the
-first lobby sync; later capabilities move the remaining lifecycle before the legacy
-shell is removed.
+through the other. The Worker path covers protected Room creation, invited Membership
+joining, same-identity reconnection across Durable Object eviction, and deterministic
+one-live-Connection replacement. Gameplay actions remain on the legacy shell until
+later capabilities move the remaining lifecycle.
+
+Invited joining uses a two-step durable handshake. The browser gives the join POST one
+high-entropy attempt ID and a monotonic request generation. An ambiguous-response retry
+reuses the ID at a higher generation; an older or equal request cannot overwrite a
+newer result. The Room stores an unpromoted reservation with a server-generated Player
+ID and only the digest of a fresh server-issued Rejoin credential. No Player or
+Membership is visible yet. Before authenticating, the browser stores that Membership
+and its discoverable last-Room pointer; a storage failure opens no socket. The first
+WebSocket that proves the current credential transactionally promotes the reservation
+into Room state and only then broadcasts it. If its first sync is lost, reload can
+reclaim the promoted Membership from the pre-auth browser record. A completed attempt
+cannot be replayed because the raw credential is never recoverable from server storage.
 
 ## Rules
 
@@ -67,6 +80,10 @@ Legality — what is never allowed:
   it enters the core or a client view. Accepted state is persisted before broadcast.
 - A public Player ID identifies a seat; only the secret, one-way-digested Rejoin
   credential proves Membership. A live Connection is transient and hibernation-safe.
+- A join attempt ID is retry correlation, not authority. It never enters game-core Room state,
+  URLs, logs, socket attachments, or syncs, and it cannot reclaim a promoted Membership.
+- Join request generations only increase, and every pending or promoted attempt owns a
+  distinct Player ID. The Room rejects stale rotations; snapshot validation rejects aliases.
 
 ## Standing decisions
 

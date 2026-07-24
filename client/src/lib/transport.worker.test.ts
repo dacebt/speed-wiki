@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { createRoom, subscribe } from './transport.worker.js';
+import { createRoom, joinRoom, subscribe } from './transport.worker.js';
 import { CREDENTIAL, PLAYER_ID, workerTransportLobby } from './transport.worker.fixtures.js';
 
 const sockets: MockWebSocket[] = [];
@@ -21,10 +21,10 @@ class MockWebSocket extends EventTarget {
     this.sent.push(value);
   }
 
-  close(): void {
+  close(code = 1006, reason = ''): void {
     if (this.readyState === 3) return;
     this.readyState = 3;
-    this.dispatchEvent(new Event('close'));
+    this.dispatchEvent(closeEvent(code, reason));
   }
 
   open(): void {
@@ -34,6 +34,10 @@ class MockWebSocket extends EventTarget {
 
   message(value: unknown): void {
     this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(value) }));
+  }
+
+  fail(): void {
+    this.dispatchEvent(new Event('error'));
   }
 }
 
@@ -46,6 +50,15 @@ beforeEach(() => {
   });
 });
 
+function closeEvent(code: number, reason: string): Event {
+  const event = new Event('close');
+  Object.defineProperties(event, {
+    code: { value: code },
+    reason: { value: reason },
+  });
+  return event;
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -53,10 +66,50 @@ afterEach(() => {
 });
 
 describe('Worker creation transport', () => {
+  test('shares one in-flight invited join and persists before publishing', async () => {
+    const publicationOrder: string[] = [];
+    const setItem = vi.fn((key: string) =>
+      publicationOrder.push(key.endsWith('.membership') ? 'membership' : 'last-room'),
+    );
+    vi.stubGlobal('localStorage', { setItem });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { roomCode: 'ABCD', playerId: PLAYER_ID, rejoinCredential: CREDENTIAL },
+          { status: 201 },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const unsubscribe = subscribe({
+      onMessage: vi.fn(() => publicationOrder.push('published')),
+      onConnect: vi.fn(),
+      onDisconnect: vi.fn(),
+    });
+
+    const first = joinRoom('Guest', 'abcd');
+    const second = joinRoom('Guest', 'ABCD');
+    expect(second).toBe(first);
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/rooms/ABCD/memberships');
+    sockets[0]!.open();
+    sockets[0]!.message({
+      type: 'room/sync',
+      room: workerTransportLobby(),
+      you: PLAYER_ID,
+      at: 1,
+    });
+
+    await expect(first).resolves.toBeUndefined();
+    expect(publicationOrder).toEqual(['membership', 'last-room', 'published']);
+    unsubscribe();
+  });
+
   test('shares one in-flight creation and resolves only after the first lobby sync', async () => {
     const publicationOrder: string[] = [];
-    const setItem = vi.fn(() => {
-      publicationOrder.push('persisted');
+    const setItem = vi.fn((key: string) => {
+      publicationOrder.push(key.endsWith('.membership') ? 'membership' : 'last-room');
     });
     vi.stubGlobal('localStorage', { setItem });
     const fetchMock = vi
@@ -113,7 +166,7 @@ describe('Worker creation transport', () => {
         rejoinCredential: CREDENTIAL,
       }),
     );
-    expect(publicationOrder).toEqual(['persisted', 'published']);
+    expect(publicationOrder).toEqual(['membership', 'last-room', 'published']);
     unsubscribe();
   });
 
@@ -151,15 +204,6 @@ describe('Worker creation transport', () => {
     });
 
     const first = createRoom('Ada');
-    await vi.waitFor(() => expect(sockets).toHaveLength(1));
-    sockets[0]!.open();
-    sockets[0]!.message({
-      type: 'room/sync',
-      room: workerTransportLobby(),
-      you: PLAYER_ID,
-      at: 1,
-    });
-
     await expect(first).rejects.toThrow('The Room membership could not be saved.');
     expect(onMessage).not.toHaveBeenCalled();
     expect(onDisconnect).toHaveBeenCalledWith({
@@ -167,12 +211,12 @@ describe('Worker creation transport', () => {
       code: 'internal-error',
       message: 'The Room membership could not be saved.',
     });
-    expect(sockets[0]!.readyState).toBe(3);
+    expect(sockets).toHaveLength(0);
 
     const retry = createRoom('Ada');
-    await vi.waitFor(() => expect(sockets).toHaveLength(2));
-    sockets[1]!.open();
-    sockets[1]!.message({
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    sockets[0]!.open();
+    sockets[0]!.message({
       type: 'room/sync',
       room: { ...workerTransportLobby(), code: 'EFGH' },
       you: PLAYER_ID,
@@ -180,8 +224,38 @@ describe('Worker creation transport', () => {
     });
     await expect(retry).resolves.toBeUndefined();
     expect(onMessage).toHaveBeenCalledOnce();
-    expect(setItem).toHaveBeenCalledTimes(2);
+    expect(setItem).toHaveBeenCalledTimes(3);
     unsubscribe();
+  });
+
+  test('last-Room pointer failure prevents authentication and promotion', async () => {
+    const setItem = vi
+      .fn()
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => {
+        throw new Error('storage blocked');
+      });
+    vi.stubGlobal('localStorage', { setItem });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { roomCode: 'ABCD', playerId: PLAYER_ID, rejoinCredential: CREDENTIAL },
+            { status: 201 },
+          ),
+        ),
+    );
+
+    await expect(createRoom('Ada')).rejects.toThrow('The Room membership could not be saved.');
+    expect(setItem).toHaveBeenNthCalledWith(
+      1,
+      'wikispeedrun.room.ABCD.membership',
+      expect.any(String),
+    );
+    expect(setItem).toHaveBeenNthCalledWith(2, 'wikispeedrun.lastRoom', 'ABCD');
+    expect(sockets).toHaveLength(0);
   });
 
   test('clears the guard after a terminal creation failure', async () => {
@@ -212,7 +286,7 @@ describe('Worker creation transport', () => {
     await expect(retry).resolves.toBeUndefined();
   });
 
-  test('post-sync close publishes a terminal disconnect', async () => {
+  test('post-sync close reconnects with the same Membership', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -244,11 +318,114 @@ describe('Worker creation transport', () => {
     sockets[0]!.close();
 
     expect(onDisconnect).toHaveBeenCalledOnce();
-    expect(onDisconnect).toHaveBeenCalledWith({
+    expect(onDisconnect).toHaveBeenCalledWith({ type: 'reconnecting' });
+    await vi.waitFor(() => expect(sockets).toHaveLength(2));
+    sockets[1]!.open();
+    expect(JSON.parse(sockets[1]!.sent[0]!)).toEqual({
+      type: 'room/connect',
+      playerId: PLAYER_ID,
+      rejoinCredential: CREDENTIAL,
+    });
+    sockets[1]!.message({
+      type: 'room/sync',
+      room: workerTransportLobby(),
+      you: PLAYER_ID,
+      at: 2,
+    });
+    unsubscribe();
+  });
+
+  test('replacement error terminates without starting a reconnect fight', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { roomCode: 'ABCD', playerId: PLAYER_ID, rejoinCredential: CREDENTIAL },
+            { status: 201 },
+          ),
+        ),
+    );
+    const onDisconnect = vi.fn();
+    const unsubscribe = subscribe({
+      onMessage: vi.fn(),
+      onConnect: vi.fn(),
+      onDisconnect,
+    });
+    const creation = createRoom('Ada');
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    sockets[0]!.open();
+    sockets[0]!.message({
+      type: 'room/sync',
+      room: workerTransportLobby(),
+      you: PLAYER_ID,
+      at: 1,
+    });
+    await creation;
+    sockets[0]!.message({
+      type: 'room/error',
+      code: 'connection-replaced',
+      message: 'This Room Membership was opened in another tab.',
+    });
+    await Promise.resolve();
+
+    expect(onDisconnect).toHaveBeenLastCalledWith({
+      type: 'terminal',
+      code: 'connection-replaced',
+      message: 'This Room Membership was opened in another tab.',
+    });
+    expect(sockets).toHaveLength(1);
+    unsubscribe();
+  });
+
+  test('reconnect retry exhaustion terminates instead of looping', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { roomCode: 'ABCD', playerId: PLAYER_ID, rejoinCredential: CREDENTIAL },
+            { status: 201 },
+          ),
+        ),
+    );
+    const onDisconnect = vi.fn();
+    const unsubscribe = subscribe({
+      onMessage: vi.fn(),
+      onConnect: vi.fn(),
+      onDisconnect,
+    });
+    const creation = createRoom('Ada');
+    await vi.advanceTimersByTimeAsync(0);
+    sockets[0]!.open();
+    sockets[0]!.message({
+      type: 'room/sync',
+      room: workerTransportLobby(),
+      you: PLAYER_ID,
+      at: 1,
+    });
+    await creation;
+
+    sockets[0]!.close();
+    expect(sockets).toHaveLength(2);
+    sockets[1]!.fail();
+    await vi.advanceTimersByTimeAsync(250);
+    expect(sockets).toHaveLength(3);
+    sockets[2]!.fail();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sockets).toHaveLength(4);
+    sockets[3]!.fail();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onDisconnect).toHaveBeenLastCalledWith({
       type: 'terminal',
       code: 'room-unavailable',
-      message: 'The Room connection was lost. Create a new Room to continue.',
+      message: 'The Room connection could not be restored.',
     });
+    expect(sockets).toHaveLength(4);
     unsubscribe();
   });
 
@@ -270,7 +447,7 @@ describe('Worker creation transport', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const first = createRoom('Ada');
-    const rejection = expect(first).rejects.toThrow('Room creation timed out.');
+    const rejection = expect(first).rejects.toThrow('Room request timed out.');
     await vi.advanceTimersByTimeAsync(10_000);
     await rejection;
     expect(observed.signal?.aborted).toBe(true);
@@ -287,6 +464,63 @@ describe('Worker creation transport', () => {
       at: 1,
     });
     await expect(retry).resolves.toBeUndefined();
+  });
+
+  test('stalled Membership response body remains inside the request deadline', async () => {
+    vi.useFakeTimers();
+    const response = new Response(null, { status: 201 });
+    vi.spyOn(response, 'json').mockImplementation(() => new Promise(() => undefined));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+
+    const creation = createRoom('Ada');
+    const rejection = expect(creation).rejects.toThrow('Room request timed out.');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejection;
+    expect(sockets).toHaveLength(0);
+  });
+
+  test('a timed-out join response retries with the same attempt id', async () => {
+    vi.useFakeTimers();
+    const firstResponse = new Response(null, { status: 201 });
+    vi.spyOn(firstResponse, 'json').mockImplementation(() => new Promise(() => undefined));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(firstResponse)
+      .mockResolvedValueOnce(
+        Response.json(
+          { roomCode: 'ABCD', playerId: PLAYER_ID, rejoinCredential: CREDENTIAL },
+          { status: 201 },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const joined = joinRoom('Guest', 'ABCD');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      playerName: string;
+      attemptId: string;
+      generation: number;
+    };
+    const retryBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      playerName: string;
+      attemptId: string;
+      generation: number;
+    };
+    expect(firstBody.playerName).toBe('Guest');
+    expect(firstBody.attemptId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(firstBody.generation).toBe(0);
+    expect(retryBody).toEqual({ ...firstBody, generation: 1 });
+
+    await vi.advanceTimersByTimeAsync(0);
+    sockets[0]!.open();
+    sockets[0]!.message({
+      type: 'room/sync',
+      room: workerTransportLobby(),
+      you: PLAYER_ID,
+      at: 1,
+    });
+    await expect(joined).resolves.toBeUndefined();
   });
 
   test('stalled first sync closes the socket and permits retry', async () => {
@@ -364,7 +598,7 @@ describe('Worker creation transport', () => {
     expect(sockets[0]!.readyState).toBe(3);
     expect(onDisconnect).toHaveBeenCalledWith({
       type: 'terminal',
-      code: 'room-unavailable',
+      code: 'internal-error',
       message: 'The Room service sent an invalid lobby response.',
     });
 

@@ -1,45 +1,47 @@
 import { MAX_NAME_LENGTH, ROOM_CODE_LENGTH } from '@wikispeedrun/shared';
 import { useEffect, useState, type FormEvent } from 'react';
-import { getPlayerId, getPlayerName, setPlayerName } from '../../lib/identity';
+import { getPlayerName, setPlayerName } from '../../lib/identity';
 import {
+  claimStoredInvite,
   createRoom as createRoomThroughTransport,
-  sendIntent,
+  joinRoom as joinRoomThroughTransport,
   supportsInvitedJoining,
 } from '../../lib/transport';
+import { readInviteCode } from './inviteCode.js';
 import './home.css';
 
 /** Read a `?code=` invite param, normalized to the room-code shape. */
 function readCodeParam(): string {
-  const raw = new URLSearchParams(window.location.search).get('code') ?? '';
-  return raw.trim().toUpperCase().slice(0, ROOM_CODE_LENGTH);
+  return readInviteCode(window.location.search);
 }
 
 export function HomeScreen() {
   const [name, setName] = useState(getPlayerName);
   const [code, setCode] = useState(readCodeParam);
-  const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState<'create' | 'join' | null>(null);
 
-  // Consume the invite param once: strip it so a refresh doesn't re-join, and
-  // auto-join when a remembered name and a full code are both present. A dead
-  // code degrades to the normal room-not-found toast; an empty name never joins.
   useEffect(() => {
     if (!supportsInvitedJoining) return;
     const params = new URLSearchParams(window.location.search);
     if (!params.has('code')) return;
     const invited = readCodeParam();
-    params.delete('code');
-    const qs = params.toString();
-    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
-
     const remembered = getPlayerName().trim();
     const nameValid = remembered.length > 0 && remembered.length <= MAX_NAME_LENGTH;
+    if (invited.length === ROOM_CODE_LENGTH) {
+      const claim = claimStoredInvite(invited);
+      if (claim !== 'join') {
+        if (claim === 'resume') consumeInviteParam(params);
+        return;
+      }
+    }
     if (nameValid && invited.length === ROOM_CODE_LENGTH) {
-      sendIntent({
-        type: 'room/join',
-        code: invited,
-        playerName: remembered,
-        playerId: getPlayerId(),
-      });
+      setSubmitting('join');
+      void joinRoomThroughTransport(remembered, invited)
+        .catch(() => undefined)
+        .finally(() => {
+          setSubmitting(null);
+          consumeInviteParam(params);
+        });
     }
   }, []);
 
@@ -47,28 +49,32 @@ export function HomeScreen() {
   const nameOk = trimmedName.length > 0 && trimmedName.length <= MAX_NAME_LENGTH;
 
   async function createRoom() {
-    if (!nameOk || creating) return;
-    setCreating(true);
+    if (!nameOk || submitting) return;
+    setSubmitting('create');
     setPlayerName(trimmedName);
     try {
       await createRoomThroughTransport(trimmedName);
     } catch {
       // The transport publishes the terminal error through the normal notice path.
     } finally {
-      setCreating(false);
+      setSubmitting(null);
+      consumeInviteParam(new URLSearchParams(window.location.search));
     }
   }
 
-  function joinRoom(e: FormEvent) {
+  async function joinRoom(e: FormEvent) {
     e.preventDefault();
-    if (!nameOk || code.trim().length !== ROOM_CODE_LENGTH) return;
+    if (!nameOk || code.trim().length !== ROOM_CODE_LENGTH || submitting) return;
+    setSubmitting('join');
     setPlayerName(trimmedName);
-    sendIntent({
-      type: 'room/join',
-      code: code.trim().toUpperCase(),
-      playerName: trimmedName,
-      playerId: getPlayerId(),
-    });
+    try {
+      await joinRoomThroughTransport(trimmedName, code);
+    } catch {
+      // The transport publishes the terminal error through the normal notice path.
+    } finally {
+      setSubmitting(null);
+      consumeInviteParam(new URLSearchParams(window.location.search));
+    }
   }
 
   return (
@@ -97,10 +103,10 @@ export function HomeScreen() {
         <button
           className="btn btn--primary home__create"
           onClick={() => void createRoom()}
-          disabled={!nameOk || creating}
-          aria-busy={creating}
+          disabled={!nameOk || submitting !== null}
+          aria-busy={submitting === 'create'}
         >
-          {creating ? 'Creating Room…' : 'Create a Room'}
+          {submitting === 'create' ? 'Creating Room…' : 'Create a Room'}
         </button>
 
         {supportsInvitedJoining && (
@@ -109,7 +115,7 @@ export function HomeScreen() {
               <span className="flavor">— or —</span>
             </div>
 
-            <form className="home__join" onSubmit={joinRoom}>
+            <form className="home__join" onSubmit={(event) => void joinRoom(event)}>
               <input
                 className="input home__code"
                 value={code}
@@ -122,9 +128,10 @@ export function HomeScreen() {
               <button
                 className="btn btn--quiet"
                 type="submit"
-                disabled={!nameOk || code.trim().length !== ROOM_CODE_LENGTH}
+                disabled={!nameOk || code.trim().length !== ROOM_CODE_LENGTH || submitting !== null}
+                aria-busy={submitting === 'join'}
               >
-                Join Room
+                {submitting === 'join' ? 'Joining…' : 'Join Room'}
               </button>
             </form>
           </>
@@ -134,4 +141,10 @@ export function HomeScreen() {
       <footer className="flavor home__footer">Dare to know (and to click fast).</footer>
     </main>
   );
+}
+
+function consumeInviteParam(params: URLSearchParams): void {
+  params.delete('code');
+  const query = params.toString();
+  window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
 }
