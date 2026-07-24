@@ -77,7 +77,7 @@ describe('Cloudflare Room creation boundary', () => {
     socket.close(1000, 'Test complete.');
   });
 
-  test('restores authenticated WebSocket attachments after Durable Object eviction', async () => {
+  test('restores authenticated WebSocket attachments for Start after Durable Object eviction', async () => {
     const created = await createRoom('Margaret');
     const stub = env.ROOMS.getByName(created.roomCode);
     const socket = await openRoomSocket(created.roomCode);
@@ -95,11 +95,12 @@ describe('Cloudflare Room creation boundary', () => {
     socket.send(JSON.stringify({ type: 'game/start' }));
     const response = await waitForMessage(socket);
 
-    expect(response).toEqual({
-      type: 'room/error',
-      code: 'room-unavailable',
-      message: 'This Room action is not available in the current migration slice.',
-    });
+    expect(response).toEqual(
+      expect.objectContaining({
+        type: 'room/sync',
+        room: expect.objectContaining({ phase: 'preparing' }),
+      }),
+    );
     socket.close(1000, 'Test complete.');
   });
 

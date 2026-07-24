@@ -7,6 +7,8 @@ const browser = await launchInstalledBrowser();
 try {
   const hostContext = await browser.newContext();
   const guestContext = await browser.newContext();
+  await stubArticleHtml(hostContext);
+  await stubArticleHtml(guestContext);
   const page = await hostContext.newPage();
   let postCount = 0;
   let releaseCreation;
@@ -53,8 +55,6 @@ try {
   ) {
     throw new Error('Lobby rendered before its Room membership was persisted.');
   }
-  await page.getByRole('status').getByText('Share the invite link', { exact: false }).waitFor();
-
   const players = page.locator('.lobby__player');
   if ((await players.count()) !== 1) throw new Error('Rendered lobby did not contain one player.');
   const host = players.first();
@@ -65,11 +65,11 @@ try {
     throw new Error('Rendered one-player lobby did not identify its host.');
   }
   if (
-    (await page.getByRole('button', { name: 'Start Game' }).count()) !== 0 ||
+    (await page.getByRole('button', { name: 'Start Game' }).count()) !== 1 ||
     (await page.getByText('Choose your portrait', { exact: true }).count()) !== 0 ||
     (await page.getByText('Round settings', { exact: true }).count()) !== 0
   ) {
-    throw new Error('Worker lobby exposed actions that are not implemented yet.');
+    throw new Error('Worker lobby did not expose only its implemented Start action.');
   }
   if ((await page.getByRole('button', { name: 'Copy invite link' }).count()) !== 1) {
     throw new Error('Worker lobby did not expose its invite path.');
@@ -131,9 +131,55 @@ try {
     throw new Error('Guest reconnect changed the Room Membership identity.');
   }
 
+  if ((await guestPage.getByRole('button', { name: 'Start Game' }).count()) !== 0) {
+    throw new Error('Invited non-host browser exposed the host Start action.');
+  }
+  await guestPage.getByText('Waiting for the host to start…', { exact: true }).waitFor();
+
+  const hostPreparing = page.getByRole('heading', { name: 'Choosing articles' }).waitFor();
+  const guestPreparing = guestPage.getByRole('heading', { name: 'Choosing articles' }).waitFor();
+  await page.getByRole('button', { name: 'Start Game' }).click();
+  await Promise.all([hostPreparing, guestPreparing]);
+  const prepared = true;
+
+  await Promise.all([
+    page.locator('.countdown__number').waitFor(),
+    guestPage.locator('.countdown__number').waitFor(),
+  ]);
+  await Promise.all([
+    page.locator('.race__route').waitFor({ timeout: 20_000 }),
+    guestPage.locator('.race__route').waitFor({ timeout: 20_000 }),
+  ]);
+  const hostPair = await page.locator('.race__route-title').allTextContents();
+  const guestPair = await guestPage.locator('.race__route-title').allTextContents();
+  if (
+    hostPair.length !== 2 ||
+    guestPair.length !== 2 ||
+    hostPair[0] !== guestPair[0] ||
+    hostPair[1] !== guestPair[1]
+  ) {
+    throw new Error('Browsers entered racing with different article pairs.');
+  }
+  if (
+    (await page.getByRole('button', { name: 'Give Up' }).count()) !== 0 ||
+    (await guestPage.getByRole('button', { name: 'Give Up' }).count()) !== 0
+  ) {
+    throw new Error('Worker racing exposed an unsupported Give Up action.');
+  }
+  const beforeArticle = await page.locator('.article-pane__title').textContent();
+  const beforeTrail = await page.locator('.race__trail').textContent();
+  await page.locator('.article-pane__body a').click();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  if (
+    (await page.locator('.article-pane__title').textContent()) !== beforeArticle ||
+    (await page.locator('.race__trail').textContent()) !== beforeTrail
+  ) {
+    throw new Error('Worker racing allowed an unsupported article hop.');
+  }
+
   console.log(
     JSON.stringify({
-      phase: 'lobby',
+      phase: 'racing',
       players: 2,
       host: true,
       roomCode,
@@ -142,6 +188,10 @@ try {
       joined: true,
       reconnected: true,
       identitiesPreserved,
+      prepared,
+      alarmTransitioned: true,
+      startArticle: hostPair[0],
+      goalArticle: hostPair[1],
       surface: 'react',
     }),
   );
@@ -184,8 +234,31 @@ async function launchInstalledBrowser() {
   return chromium.launch({ executablePath, headless: true });
 }
 
+async function stubArticleHtml(context) {
+  await context.route('https://en.wikipedia.org/api/rest_v1/page/html/**', async (route) => {
+    const title = decodeURIComponent(route.request().url().split('/').at(-1) ?? '').replaceAll(
+      '_',
+      ' ',
+    );
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: `<article><p>Stubbed article for ${escapeHtml(title)}. <a href="/wiki/Unsupported_Hop">Try another article</a></p></article>`,
+    });
+  });
+}
+
+function escapeHtml(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
 async function waitUntil(predicate, label) {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     if (await predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));

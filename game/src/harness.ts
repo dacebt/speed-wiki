@@ -41,8 +41,14 @@ export function startRacing(
   { start = 'Start', goal = 'Goal', at = 1000 } = {},
 ): CoreRoom {
   const host = room.players.find((p) => p.isHost)!;
-  const started = apply(room, client(host.id, { type: 'game/start' }, at)).room;
-  return apply(started, {
+  const preparing = apply(room, client(host.id, { type: 'game/start' }, at)).room;
+  const countdown = apply(preparing, {
+    kind: 'sys/roundPrepared',
+    startArticle: start,
+    goalArticle: goal,
+    at,
+  }).room;
+  return apply(countdown, {
     kind: 'sys/countdownFinished',
     startArticle: start,
     goalArticle: goal,

@@ -18,6 +18,7 @@ const POINTS_FLOOR = 1;
 
 export type CoreIntent =
   | { kind: 'client'; playerId: string; at: number; intent: ClientIntent }
+  | { kind: 'sys/roundPrepared'; startArticle: string; goalArticle: string; at: number }
   | { kind: 'sys/countdownFinished'; startArticle: string; goalArticle: string; at: number }
   | { kind: 'sys/roundTimedOut'; at: number }
   // A dropped socket marks the player away (slot held); a lapsed grace window
@@ -35,6 +36,21 @@ export function decide(room: CoreRoom, intent: CoreIntent): Decision {
   switch (intent.kind) {
     case 'client':
       return decideClient(room, intent.playerId, intent.at, intent.intent);
+    case 'sys/roundPrepared': {
+      if (room.phase !== 'preparing') return { ok: true, events: [] };
+      return {
+        ok: true,
+        events: [
+          {
+            type: 'CountdownStarted',
+            endsAt: intent.at + room.settings.countdownMs,
+            startArticle: intent.startArticle,
+            goalArticle: intent.goalArticle,
+            at: intent.at,
+          },
+        ],
+      };
+    }
     case 'sys/countdownFinished': {
       if (room.phase !== 'countdown') return { ok: true, events: [] };
       const roundNumber = room.roundsPlayed + 1;
@@ -57,8 +73,8 @@ export function decide(room: CoreRoom, intent: CoreIntent): Decision {
       return { ok: true, events: [endRound(room, intent.at)] };
     }
     case 'sys/roundStartFailed': {
-      if (room.phase !== 'countdown') return { ok: true, events: [] };
-      return { ok: true, events: [{ type: 'CountdownAborted', at: intent.at }] };
+      if (room.phase !== 'preparing') return { ok: true, events: [] };
+      return { ok: true, events: [{ type: 'RoundPreparationAborted', at: intent.at }] };
     }
     case 'sys/playerAway': {
       // Hold the slot: mark away rather than removing, so a rejoin reattaches.
@@ -152,8 +168,7 @@ function decideClient(
         ok: true,
         events: [
           {
-            type: 'CountdownStarted',
-            endsAt: at + room.settings.countdownMs,
+            type: 'RoundPreparationStarted',
             difficulty: room.settings.difficulty,
             category: room.settings.category,
             at,

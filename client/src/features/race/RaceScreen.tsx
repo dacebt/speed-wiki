@@ -2,7 +2,7 @@ import type { PlayerView } from '@wikispeedrun/shared';
 import { useEffect, useRef, useState } from 'react';
 import { useAppDispatch, useAppState } from '../../app/store';
 import { Avatar } from '../../components/Avatar';
-import { sendIntent } from '../../lib/transport';
+import { sendIntent, supportsRaceActions } from '../../lib/transport';
 import { ArticlePane } from './viewer/ArticlePane';
 import './race.css';
 
@@ -28,12 +28,13 @@ export function RaceScreen() {
   const round = room.round;
 
   function handleNavigate(title: string) {
+    if (!supportsRaceActions) return;
     hopPendingRef.current = true;
     setNav((n) => ({ title, seq: n.seq + 1 }));
   }
 
   function handleArrived(canonicalTitle: string) {
-    if (!hopPendingRef.current) return;
+    if (!supportsRaceActions || !hopPendingRef.current) return;
     hopPendingRef.current = false;
     sendIntent({ type: 'race/hop', article: canonicalTitle });
   }
@@ -75,7 +76,7 @@ export function RaceScreen() {
             onArrived={handleArrived}
             onNavigate={handleNavigate}
             onBlocked={handleBlocked}
-            frozen={frozen}
+            frozen={frozen || !supportsRaceActions}
           />
           {frozen && (
             <div className="race__done-overlay">
@@ -153,12 +154,14 @@ function WagerBoard({
         </ul>
       </div>
 
-      <button
-        className="btn btn--quiet race__giveup"
-        onClick={() => sendIntent({ type: 'race/giveUp' })}
-      >
-        Give Up
-      </button>
+      {supportsRaceActions && (
+        <button
+          className="btn btn--quiet race__giveup"
+          onClick={() => sendIntent({ type: 'race/giveUp' })}
+        >
+          Give Up
+        </button>
+      )}
     </aside>
   );
 }

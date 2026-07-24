@@ -42,6 +42,23 @@ export function parseConnectMessage(raw: string | ArrayBuffer): RoomConnectMessa
   }
 }
 
+export type AuthenticatedRoomMessage = { type: 'game/start' } | 'unsupported' | 'invalid';
+
+export function parseAuthenticatedMessage(raw: string | ArrayBuffer): AuthenticatedRoomMessage {
+  if (typeof raw !== 'string') return 'invalid';
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'invalid';
+    const record = value as Record<string, unknown>;
+    if (record.type !== 'game/start') {
+      return typeof record.type === 'string' ? 'unsupported' : 'invalid';
+    }
+    return hasExactKeys(record, ['type']) ? { type: 'game/start' } : 'invalid';
+  } catch {
+    return 'invalid';
+  }
+}
+
 export function send(socket: SocketWriter, message: ServerMessage): void {
   socket.send(JSON.stringify(message));
 }

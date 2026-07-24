@@ -57,7 +57,7 @@ export function isRoomSettingsInRange(s: RoomSettings): boolean {
 
 // Listed at runtime so the client boundary can check membership; the RoomPhase
 // type is derived from this list, keeping it the single source of truth.
-export const ROOM_PHASES = ['lobby', 'countdown', 'racing', 'results'] as const;
+export const ROOM_PHASES = ['lobby', 'preparing', 'countdown', 'racing', 'results'] as const;
 
 export type RoomPhase = (typeof ROOM_PHASES)[number];
 

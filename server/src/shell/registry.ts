@@ -159,50 +159,44 @@ function clearTimers(runtime: RoomRuntime): void {
     dropping a kicked socket from the room. */
 function react(runtime: RoomRuntime, event: RoomEvent): void {
   switch (event.type) {
-    case 'CountdownStarted': {
-      // Pick the articles while the countdown runs; the round starts when both
-      // the timer and the pick have completed. Settle the selection to a plain
-      // value with its handler attached NOW — a random-fetch rejection can land
-      // mid-countdown, and an unhandled rejection would crash the process.
+    case 'RoundPreparationStarted': {
       const selection = pickPair(event.difficulty, event.category).then(
         (pair) => ({ ok: true as const, pair }),
         (err: unknown) => ({ ok: false as const, err }),
       );
+      void selection.then((result) => {
+        if (!rooms.has(runtime.state.code)) return;
+        if (result.ok) {
+          dispatch(runtime, {
+            kind: 'sys/roundPrepared',
+            startArticle: result.pair.startArticle,
+            goalArticle: result.pair.goalArticle,
+            at: Date.now(),
+          });
+          return;
+        }
+        console.warn(`pair selection failed for room ${runtime.state.code}:`, result.err);
+        for (const socket of runtime.members.values()) {
+          send(socket, {
+            type: 'room/error',
+            code: 'article-fetch-failed',
+            message: "Couldn't reach random Wikipedia articles — try again or switch difficulty.",
+          });
+        }
+        dispatch(runtime, { kind: 'sys/roundStartFailed', at: Date.now() });
+      });
+      break;
+    }
+    case 'CountdownStarted': {
       runtime.countdownTimer = setTimeout(
         () => {
           runtime.countdownTimer = null;
-          // The callback dispatches and sends; neither is expected to throw, but
-          // this runs from a timer with no caller to catch a rejection — so a
-          // stray throw is contained here rather than crashing the process, the
-          // same failure class the synchronous handler above already guards.
-          void selection
-            .then((result) => {
-              if (!rooms.has(runtime.state.code)) return;
-              if (result.ok) {
-                dispatch(runtime, {
-                  kind: 'sys/countdownFinished',
-                  startArticle: result.pair.startArticle,
-                  goalArticle: result.pair.goalArticle,
-                  at: Date.now(),
-                });
-                return;
-              }
-              // Honest failure: no silent curated substitution. Tell the room the
-              // articles couldn't be reached and abort the countdown to the lobby.
-              console.warn(`pair selection failed for room ${runtime.state.code}:`, result.err);
-              for (const socket of runtime.members.values()) {
-                send(socket, {
-                  type: 'room/error',
-                  code: 'article-fetch-failed',
-                  message:
-                    "Couldn't reach random Wikipedia articles — try again or switch difficulty.",
-                });
-              }
-              dispatch(runtime, { kind: 'sys/roundStartFailed', at: Date.now() });
-            })
-            .catch((err: unknown) => {
-              console.error(`round-start reaction failed for room ${runtime.state.code}:`, err);
-            });
+          dispatch(runtime, {
+            kind: 'sys/countdownFinished',
+            startArticle: event.startArticle,
+            goalArticle: event.goalArticle,
+            at: Date.now(),
+          });
         },
         Math.max(0, event.endsAt - Date.now()),
       );
@@ -238,7 +232,7 @@ function react(runtime: RoomRuntime, event: RoomEvent): void {
     }
     case 'RoundEnded':
     case 'ReturnedToLobby':
-    case 'CountdownAborted':
+    case 'RoundPreparationAborted':
       clearTimers(runtime);
       break;
     default:

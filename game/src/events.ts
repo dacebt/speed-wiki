@@ -13,16 +13,17 @@ export type RoomEvent =
   | { type: 'PlayerReconnected'; playerId: string; at: number }
   | { type: 'CosmeticsSet'; playerId: string; cosmetics: PlayerCosmetics; at: number }
   | { type: 'SettingsChanged'; settings: RoomSettings; at: number }
+  | { type: 'RoundPreparationStarted'; difficulty: Difficulty; category: Category; at: number }
+  // The pending round could not be prepared (e.g. random articles unreachable);
+  // the room returns to the lobby honestly rather than silently substituting.
+  | { type: 'RoundPreparationAborted'; at: number }
   | {
       type: 'CountdownStarted';
       endsAt: number;
-      difficulty: Difficulty;
-      category: Category;
+      startArticle: string;
+      goalArticle: string;
       at: number;
     }
-  // The pending round could not be started (e.g. random articles unreachable);
-  // the room returns to the lobby honestly rather than silently substituting.
-  | { type: 'CountdownAborted'; at: number }
   | {
       type: 'RoundStarted';
       roundNumber: number;

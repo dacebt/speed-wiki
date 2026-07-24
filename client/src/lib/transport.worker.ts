@@ -28,6 +28,8 @@ import {
 
 export const supportsInvitedJoining = true;
 export const supportsLobbyActions = false;
+export const supportsRoundStart = true;
+export const supportsRaceActions = false;
 export { parseRoomMembershipResponse as parseCreateRoomResponse };
 
 let claimedInviteMembership: RoomMembership | null = null;

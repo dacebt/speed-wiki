@@ -39,9 +39,10 @@ allocates a named Room Durable Object, and that object validates and persists a
 versioned Room snapshot before sending a full sync. The runtime is selected at build
 time, so Socket.IO is absent from the Worker browser bundle and neither shell routes
 through the other. The Worker path covers protected Room creation, invited Membership
-joining, same-identity reconnection across Durable Object eviction, and deterministic
-one-live-Connection replacement. Gameplay actions remain on the legacy shell until
-later capabilities move the remaining lifecycle.
+joining, same-identity reconnection across Durable Object eviction, deterministic
+one-live-Connection replacement, and authenticated host Start through recoverable
+article preparation and a durable countdown. Later gameplay actions remain on the
+legacy shell until their capabilities move the rest of the lifecycle.
 
 Invited joining uses a two-step durable handshake. The browser gives the join POST one
 high-entropy attempt ID and a monotonic request generation. An ambiguous-response retry
@@ -54,6 +55,21 @@ WebSocket that proves the current credential transactionally promotes the reserv
 into Room state and only then broadcasts it. If its first sync is lost, reload can
 reclaim the promoted Membership from the pre-auth browser record. A completed attempt
 cannot be replayed because the raw credential is never recoverable from server storage.
+
+Worker Round preparation is an explicit Room phase. Accepted Start persists the
+preparing Room, one generation token, the chosen difficulty/category, and one typed
+preparation Deadline before broadcasting. The Durable Object alarm performs article
+selection; a random selection either succeeds within its bounded retry budget or
+returns the Room to the lobby with `article-fetch-failed`, never a curated substitute.
+Selection success persists the common pair, countdown state, and replacement countdown
+Deadline before broadcasting. That alarm is the sole transition into racing: it
+rechecks the preparation token, folds the core transition, clears pending runtime
+state, and persists before sync. Duplicate or stale alarm work is a no-op after
+eviction or at-least-once delivery. The Worker does not yet schedule round timeout.
+The two-browser smoke observes that live alarm path through the public product surface.
+Forced eviction remains integration evidence: `cloudflare:test` evicts the Room between
+both transitions while two sockets stay attached. The browser surface has no test-only
+route for controlling Durable Object lifetime.
 
 ## Rules
 
@@ -84,6 +100,9 @@ Legality — what is never allowed:
   URLs, logs, socket attachments, or syncs, and it cannot reclaim a promoted Membership.
 - Join request generations only increase, and every pending or promoted attempt owns a
   distinct Player ID. The Room rejects stale rotations; snapshot validation rejects aliases.
+- Worker future transitions have one owner: the persisted typed Deadline and Durable Object
+  alarm. Worker Room code never uses JavaScript timers, and an async preparation result must
+  still own the persisted generation token before it may change Room state.
 
 ## Standing decisions
 

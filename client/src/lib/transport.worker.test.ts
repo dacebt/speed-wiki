@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { createRoom, joinRoom, subscribe } from './transport.worker.js';
+import { createRoom, joinRoom, subscribe, supportsRaceActions } from './transport.worker.js';
 import { CREDENTIAL, PLAYER_ID, workerTransportLobby } from './transport.worker.fixtures.js';
 
 const sockets: MockWebSocket[] = [];
@@ -66,6 +66,10 @@ afterEach(() => {
 });
 
 describe('Worker creation transport', () => {
+  test('advertises the racing surface as read-only', () => {
+    expect(supportsRaceActions).toBe(false);
+  });
+
   test('shares one in-flight invited join and persists before publishing', async () => {
     const publicationOrder: string[] = [];
     const setItem = vi.fn((key: string) =>

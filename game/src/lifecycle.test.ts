@@ -160,37 +160,88 @@ describe('room settings', () => {
   });
 });
 
-describe('difficulty', () => {
-  test('the chosen difficulty is what the countdown carries into article selection', () => {
+describe('round preparation', () => {
+  test('the chosen difficulty is carried into article selection', () => {
     let room = seedPlayers('host');
     room = apply(
       room,
       client('host', { type: 'room/setSettings', settings: { difficulty: 'random' } }),
     ).room;
     const { events } = apply(room, client('host', { type: 'game/start' }, 0));
-    expect(events.find((e) => e.type === 'CountdownStarted')).toMatchObject({
+    expect(events.find((e) => e.type === 'RoundPreparationStarted')).toMatchObject({
       difficulty: 'random',
     });
   });
 
-  test('the chosen category is carried onto the countdown alongside difficulty', () => {
+  test('the chosen category is carried into article selection', () => {
     let room = seedPlayers('host');
     room = apply(
       room,
       client('host', { type: 'room/setSettings', settings: { category: 'history' } }),
     ).room;
     const { events } = apply(room, client('host', { type: 'game/start' }, 0));
-    expect(events.find((e) => e.type === 'CountdownStarted')).toMatchObject({
+    expect(events.find((e) => e.type === 'RoundPreparationStarted')).toMatchObject({
       category: 'history',
     });
   });
 
-  test('a failed round start aborts the countdown back to the lobby, not into a bad round', () => {
+  test('successful preparation begins the countdown with the selected pair', () => {
     let room = apply(seedPlayers('host'), client('host', { type: 'game/start' }, 0)).room;
+    const prepared = apply(room, {
+      kind: 'sys/roundPrepared',
+      startArticle: 'Ada Lovelace',
+      goalArticle: 'Analytical Engine',
+      at: 100,
+    });
+    room = prepared.room;
     expect(room.phase).toBe('countdown');
+    expect(prepared.events).toEqual([
+      expect.objectContaining({
+        type: 'CountdownStarted',
+        startArticle: 'Ada Lovelace',
+        goalArticle: 'Analytical Engine',
+      }),
+    ]);
+  });
+
+  test('failed preparation returns to the lobby without a round', () => {
+    let room = apply(seedPlayers('host'), client('host', { type: 'game/start' }, 0)).room;
+    expect(room.phase).toBe('preparing');
     room = apply(room, { kind: 'sys/roundStartFailed', at: 1000 }).room;
     expect(room.phase).toBe('lobby');
     expect(room.round).toBeNull();
+  });
+
+  test('duplicate preparation and countdown transitions are no-ops', () => {
+    let room = apply(seedPlayers('host'), client('host', { type: 'game/start' }, 0)).room;
+    room = apply(room, {
+      kind: 'sys/roundPrepared',
+      startArticle: 'Start',
+      goalArticle: 'Goal',
+      at: 100,
+    }).room;
+    expect(
+      decide(room, {
+        kind: 'sys/roundPrepared',
+        startArticle: 'Other',
+        goalArticle: 'Elsewhere',
+        at: 200,
+      }),
+    ).toEqual({ ok: true, events: [] });
+    room = apply(room, {
+      kind: 'sys/countdownFinished',
+      startArticle: 'Start',
+      goalArticle: 'Goal',
+      at: 10_100,
+    }).room;
+    expect(
+      decide(room, {
+        kind: 'sys/countdownFinished',
+        startArticle: 'Start',
+        goalArticle: 'Goal',
+        at: 10_200,
+      }),
+    ).toEqual({ ok: true, events: [] });
   });
 });
 

@@ -7,11 +7,13 @@ import {
   isRoomSettingsInRange,
   isValidCosmetics,
   normalizeRoomCode,
+  type Category,
+  type Difficulty,
   type RoomSettings,
   type RoundView,
 } from '@wikispeedrun/shared';
 
-export const ROOM_SNAPSHOT_VERSION = 3;
+export const ROOM_SNAPSHOT_VERSION = 4;
 export const ROOM_STORAGE_KEY = 'room';
 
 interface Membership {
@@ -31,11 +33,29 @@ type JoinAttempt =
       playerId: string;
     };
 
+interface PreparedArticlePair {
+  startArticle: string;
+  goalArticle: string;
+}
+
+interface RoundPreparation {
+  token: string;
+  difficulty: Difficulty;
+  category: Category;
+  pair: PreparedArticlePair | null;
+}
+
+type RoomDeadline =
+  | { kind: 'round-preparation'; token: string; at: number }
+  | { kind: 'countdown'; token: string; at: number };
+
 export interface RoomSnapshot {
   schemaVersion: typeof ROOM_SNAPSHOT_VERSION;
   room: CoreRoom;
   memberships: Record<string, Membership>;
   joinAttempts: Record<string, JoinAttempt>;
+  roundPreparation: RoundPreparation | null;
+  deadline: RoomDeadline | null;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -106,8 +126,10 @@ function parseRound(value: unknown): RoundView | null | undefined {
     !isPositiveInteger(value.roundNumber) ||
     typeof value.startArticle !== 'string' ||
     value.startArticle.trim().length === 0 ||
+    value.startArticle !== value.startArticle.trim() ||
     typeof value.goalArticle !== 'string' ||
     value.goalArticle.trim().length === 0 ||
+    value.goalArticle !== value.goalArticle.trim() ||
     !isNonNegativeInteger(value.startedAt) ||
     !isPositiveInteger(value.deadline) ||
     value.deadline <= value.startedAt
@@ -295,6 +317,63 @@ function parseJoinAttempts(value: unknown): Record<string, JoinAttempt> | null {
   return attempts;
 }
 
+function parsePreparedPair(value: unknown): PreparedArticlePair | null | undefined {
+  if (value === null) return null;
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['startArticle', 'goalArticle']) ||
+    typeof value.startArticle !== 'string' ||
+    value.startArticle.trim().length === 0 ||
+    value.startArticle !== value.startArticle.trim() ||
+    typeof value.goalArticle !== 'string' ||
+    value.goalArticle.trim().length === 0 ||
+    value.goalArticle !== value.goalArticle.trim() ||
+    value.startArticle === value.goalArticle
+  ) {
+    return undefined;
+  }
+  return { startArticle: value.startArticle, goalArticle: value.goalArticle };
+}
+
+function parseRoundPreparation(value: unknown): RoundPreparation | null | undefined {
+  if (value === null) return null;
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['token', 'difficulty', 'category', 'pair']) ||
+    typeof value.token !== 'string' ||
+    !isUuid(value.token) ||
+    typeof value.difficulty !== 'string' ||
+    !(DIFFICULTIES as readonly string[]).includes(value.difficulty) ||
+    typeof value.category !== 'string' ||
+    !(CATEGORIES as readonly string[]).includes(value.category)
+  ) {
+    return undefined;
+  }
+  const pair = parsePreparedPair(value.pair);
+  if (pair === undefined) return undefined;
+  return {
+    token: value.token,
+    difficulty: value.difficulty as Difficulty,
+    category: value.category as Category,
+    pair,
+  };
+}
+
+function parseDeadline(value: unknown): RoomDeadline | null | undefined {
+  if (value === null) return null;
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['kind', 'token', 'at']) ||
+    (value.kind !== 'round-preparation' && value.kind !== 'countdown') ||
+    typeof value.token !== 'string' ||
+    !isUuid(value.token) ||
+    !isPositiveInteger(value.at)
+  ) {
+    return undefined;
+  }
+  return { kind: value.kind, token: value.token, at: value.at };
+}
+
 function isCoherentRoom(room: CoreRoom): boolean {
   const playerIds = room.players.map((player) => player.id);
   if (
@@ -315,6 +394,8 @@ function isCoherentRoom(room: CoreRoom): boolean {
 
   switch (room.phase) {
     case 'lobby':
+      return room.round === null && room.countdownEndsAt === null;
+    case 'preparing':
       return room.round === null && room.countdownEndsAt === null;
     case 'countdown':
       return room.round === null && room.countdownEndsAt !== null;
@@ -351,7 +432,14 @@ function isCoherentActiveRound(room: CoreRoom): boolean {
 export function parseRoomSnapshot(value: unknown): RoomSnapshot {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ['schemaVersion', 'room', 'memberships', 'joinAttempts']) ||
+    !hasExactKeys(value, [
+      'schemaVersion',
+      'room',
+      'memberships',
+      'joinAttempts',
+      'roundPreparation',
+      'deadline',
+    ]) ||
     value.schemaVersion !== ROOM_SNAPSHOT_VERSION
   ) {
     throw new Error('Invalid Room snapshot version.');
@@ -359,9 +447,13 @@ export function parseRoomSnapshot(value: unknown): RoomSnapshot {
   const room = parseRoom(value.room);
   const memberships = parseMemberships(value.memberships);
   const joinAttempts = parseJoinAttempts(value.joinAttempts);
+  const roundPreparation = parseRoundPreparation(value.roundPreparation);
+  const deadline = parseDeadline(value.deadline);
   if (!room) throw new Error('Invalid Room snapshot state.');
   if (!memberships) throw new Error('Invalid Room snapshot Memberships.');
   if (!joinAttempts) throw new Error('Invalid Room snapshot join attempts.');
+  if (roundPreparation === undefined) throw new Error('Invalid Room snapshot Round preparation.');
+  if (deadline === undefined) throw new Error('Invalid Room snapshot Deadline.');
   if (
     room.players.length === 0 ||
     room.players.some((player) => memberships[player.id] === undefined) ||
@@ -383,5 +475,45 @@ export function parseRoomSnapshot(value: unknown): RoomSnapshot {
   if (new Set(attemptedPlayerIds).size !== attemptedPlayerIds.length) {
     throw new Error('Invalid join attempt Player identity aliases.');
   }
-  return { schemaVersion: ROOM_SNAPSHOT_VERSION, room, memberships, joinAttempts };
+  if (!isCoherentRuntimeState(room, roundPreparation, deadline)) {
+    throw new Error('Invalid Room snapshot pending runtime state.');
+  }
+  return {
+    schemaVersion: ROOM_SNAPSHOT_VERSION,
+    room,
+    memberships,
+    joinAttempts,
+    roundPreparation,
+    deadline,
+  };
+}
+
+function isCoherentRuntimeState(
+  room: CoreRoom,
+  preparation: RoundPreparation | null,
+  deadline: RoomDeadline | null,
+): boolean {
+  const matchesSettings =
+    preparation?.difficulty === room.settings.difficulty &&
+    preparation.category === room.settings.category;
+  if (room.phase === 'preparing') {
+    return (
+      preparation !== null &&
+      matchesSettings &&
+      preparation.pair === null &&
+      deadline?.kind === 'round-preparation' &&
+      deadline.token === preparation.token
+    );
+  }
+  if (room.phase === 'countdown') {
+    return (
+      preparation !== null &&
+      matchesSettings &&
+      preparation.pair !== null &&
+      deadline?.kind === 'countdown' &&
+      deadline.token === preparation.token &&
+      deadline.at === room.countdownEndsAt
+    );
+  }
+  return preparation === null && deadline === null;
 }

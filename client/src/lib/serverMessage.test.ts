@@ -45,6 +45,14 @@ describe('server message exact validation', () => {
     });
     expect(parseServerMessage(message)).toBeNull();
   });
+
+  test('accepts the preparing phase without a countdown or Round', () => {
+    const message = syncRecord();
+    message.room.phase = 'preparing';
+    message.room.countdownEndsAt = null;
+    message.room.round = null;
+    expect(parseServerMessage(message)).toEqual(message);
+  });
 });
 
 interface SyncRecord {

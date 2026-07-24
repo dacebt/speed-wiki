@@ -50,10 +50,13 @@ export function reduce(room: CoreRoom, event: RoomEvent): CoreRoom {
     case 'SettingsChanged':
       return { ...room, settings: event.settings };
 
+    case 'RoundPreparationStarted':
+      return { ...room, phase: 'preparing', countdownEndsAt: null };
+
     case 'CountdownStarted':
       return { ...room, phase: 'countdown', countdownEndsAt: event.endsAt };
 
-    case 'CountdownAborted':
+    case 'RoundPreparationAborted':
       return { ...room, phase: 'lobby', countdownEndsAt: null, round: null };
 
     case 'RoundStarted':

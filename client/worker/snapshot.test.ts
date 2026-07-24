@@ -6,6 +6,7 @@ const HOST_ID = '1f6f49f6-30d5-4fb7-bab8-d015bf878fe8';
 const OTHER_ID = 'c61ecdb5-0476-4503-953b-04567336f436';
 const ATTEMPT_ID = '9e2a5f17-b57f-4ee9-9a7d-b4ae8f2dd1b2';
 const OTHER_ATTEMPT_ID = '2297ac68-da58-4cad-94ae-e5f863beab60';
+const PREPARATION_TOKEN = '018f1f21-9fd8-4c8a-a639-0f6d40ceefab';
 const DIGEST = 'a'.repeat(64);
 
 describe('durable Room snapshot validation', () => {
@@ -73,6 +74,84 @@ describe('durable Room snapshot validation', () => {
 
   test('accepts the persisted one-host lobby', () => {
     expect(parseRoomSnapshot(validSnapshot())).toEqual(validSnapshot());
+  });
+
+  test('accepts exact preparing and countdown recovery states', () => {
+    const preparing = preparingSnapshot();
+    expect(parseRoomSnapshot(preparing)).toEqual(preparing);
+    const countdown = countdownSnapshot();
+    expect(parseRoomSnapshot(countdown)).toEqual(countdown);
+  });
+
+  test.each([
+    [
+      'preparing without a preparation',
+      (snapshot: RoomSnapshot) => {
+        snapshot.roundPreparation = null;
+      },
+    ],
+    [
+      'preparing with a selected pair',
+      (snapshot: RoomSnapshot) => {
+        snapshot.roundPreparation!.pair = {
+          startArticle: 'Ada Lovelace',
+          goalArticle: 'Analytical Engine',
+        };
+      },
+    ],
+    [
+      'preparing with a countdown deadline',
+      (snapshot: RoomSnapshot) => {
+        snapshot.deadline!.kind = 'countdown';
+      },
+    ],
+    [
+      'preparing with mismatched tokens',
+      (snapshot: RoomSnapshot) => {
+        snapshot.deadline!.token = OTHER_ATTEMPT_ID;
+      },
+    ],
+    [
+      'preparing with settings that differ from its request',
+      (snapshot: RoomSnapshot) => {
+        snapshot.roundPreparation!.category = 'history';
+      },
+    ],
+  ])('rejects %s', (_label, mutate) => {
+    const snapshot = preparingSnapshot();
+    mutate(snapshot);
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('pending runtime state');
+  });
+
+  test.each([
+    [
+      'countdown without a pair',
+      (snapshot: RoomSnapshot) => {
+        snapshot.roundPreparation!.pair = null;
+      },
+    ],
+    [
+      'countdown deadline that disagrees with the Room',
+      (snapshot: RoomSnapshot) => {
+        snapshot.deadline!.at += 1;
+      },
+    ],
+    [
+      'countdown with a preparation deadline',
+      (snapshot: RoomSnapshot) => {
+        snapshot.deadline!.kind = 'round-preparation';
+      },
+    ],
+  ])('rejects %s', (_label, mutate) => {
+    const snapshot = countdownSnapshot();
+    mutate(snapshot);
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('pending runtime state');
+  });
+
+  test('rejects outer whitespace in a prepared article pair', () => {
+    const snapshot = countdownSnapshot();
+    snapshot.roundPreparation!.pair!.startArticle = ' Ada Lovelace';
+    expect(() => parseRoomSnapshot(snapshot)).toThrow('Invalid Room snapshot Round preparation.');
   });
 
   test('accepts an exact pending join reservation outside visible Room state', () => {
@@ -247,7 +326,42 @@ function validSnapshot(): RoomSnapshot {
     room,
     memberships: { [HOST_ID]: { credentialDigest: DIGEST } },
     joinAttempts: {},
+    roundPreparation: null,
+    deadline: null,
   };
+}
+
+function preparingSnapshot(): RoomSnapshot {
+  const snapshot = validSnapshot();
+  snapshot.room.phase = 'preparing';
+  snapshot.roundPreparation = {
+    token: PREPARATION_TOKEN,
+    difficulty: 'curated',
+    category: 'any',
+    pair: null,
+  };
+  snapshot.deadline = {
+    kind: 'round-preparation',
+    token: PREPARATION_TOKEN,
+    at: 1_000,
+  };
+  return snapshot;
+}
+
+function countdownSnapshot(): RoomSnapshot {
+  const snapshot = preparingSnapshot();
+  snapshot.room.phase = 'countdown';
+  snapshot.room.countdownEndsAt = 11_000;
+  snapshot.roundPreparation!.pair = {
+    startArticle: 'Ada Lovelace',
+    goalArticle: 'Analytical Engine',
+  };
+  snapshot.deadline = {
+    kind: 'countdown',
+    token: PREPARATION_TOKEN,
+    at: 11_000,
+  };
+  return snapshot;
 }
 
 function createHost(room: CoreRoom): CoreRoom {

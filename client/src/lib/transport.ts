@@ -6,4 +6,6 @@ export {
   subscribe,
   supportsInvitedJoining,
   supportsLobbyActions,
+  supportsRaceActions,
+  supportsRoundStart,
 } from '@runtime-transport';

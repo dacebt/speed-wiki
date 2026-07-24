@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useAppDispatch, useAppState } from './app/store';
 import { CountdownScreen } from './features/countdown/CountdownScreen';
+import { PreparingScreen } from './features/countdown/PreparingScreen';
 import { HomeScreen } from './features/home/HomeScreen';
 import { LobbyScreen } from './features/lobby/LobbyScreen';
 import { RaceScreen } from './features/race/RaceScreen';
@@ -33,6 +34,8 @@ export default function App() {
     switch (room.phase) {
       case 'lobby':
         return <LobbyScreen />;
+      case 'preparing':
+        return <PreparingScreen />;
       case 'countdown':
         return <CountdownScreen />;
       case 'racing':

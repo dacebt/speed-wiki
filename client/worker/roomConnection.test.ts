@@ -1,5 +1,10 @@
 import { describe, expect, test, vi } from 'vitest';
-import { parseAttachment, parseConnectMessage, rejectSocket } from './roomConnection.js';
+import {
+  parseAttachment,
+  parseAuthenticatedMessage,
+  parseConnectMessage,
+  rejectSocket,
+} from './roomConnection.js';
 
 const PLAYER_ID = '1f6f49f6-30d5-4fb7-bab8-d015bf878fe8';
 const CREDENTIAL = 'A'.repeat(43);
@@ -30,6 +35,17 @@ describe('Room Connection exact validation', () => {
     expect(
       parseConnectMessage(JSON.stringify({ ...valid, rejoinCredential: 'not-a-credential' })),
     ).toBeNull();
+  });
+
+  test('accepts only exact Start after authentication', () => {
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'game/start' }))).toEqual({
+      type: 'game/start',
+    });
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'game/start', extra: true }))).toBe(
+      'invalid',
+    );
+    expect(parseAuthenticatedMessage(JSON.stringify({ type: 'race/hop' }))).toBe('unsupported');
+    expect(parseAuthenticatedMessage(new ArrayBuffer(0))).toBe('invalid');
   });
 
   test('reject closes a socket even when the structured error cannot be sent', () => {

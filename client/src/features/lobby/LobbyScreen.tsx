@@ -9,7 +9,12 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../../app/store';
 import { Avatar } from '../../components/Avatar';
-import { sendIntent, supportsInvitedJoining, supportsLobbyActions } from '../../lib/transport';
+import {
+  sendIntent,
+  supportsInvitedJoining,
+  supportsLobbyActions,
+  supportsRoundStart,
+} from '../../lib/transport';
 import './lobby.css';
 
 export function LobbyScreen() {
@@ -80,7 +85,7 @@ export function LobbyScreen() {
 
       {supportsLobbyActions && <RoundSettings settings={room.settings} isHost={isHost} />}
 
-      {supportsLobbyActions ? (
+      {supportsRoundStart ? (
         <section className="lobby__actions">
           {isHost ? (
             <button
@@ -95,9 +100,7 @@ export function LobbyScreen() {
         </section>
       ) : (
         <section className="panel lobby__actions" role="status">
-          <p className="flavor">
-            Room saved. Share the invite link; racing arrives in the next build slice.
-          </p>
+          <p className="flavor">Room saved. Share the invite link while the host gets ready.</p>
         </section>
       )}
     </main>
