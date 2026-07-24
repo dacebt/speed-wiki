@@ -1,6 +1,6 @@
 import { accessSync, constants } from 'node:fs';
 import { chromium } from 'playwright-core';
-import { configureLobby } from './probeLobby.mjs';
+import { configureLobby, startWithRejectedSettings } from './probeLobby.mjs';
 
 const baseUrl = process.env.BASE_URL ?? 'http://127.0.0.1:5173';
 const browser = await launchInstalledBrowser();
@@ -133,13 +133,8 @@ try {
   }
   await guestPage.getByText('Waiting for the host to start…', { exact: true }).waitFor();
 
-  const lobbyActions = await configureLobby(page, guestPage);
-
-  const hostPreparing = page.getByRole('heading', { name: 'Choosing articles' }).waitFor();
-  const guestPreparing = guestPage.getByRole('heading', { name: 'Choosing articles' }).waitFor();
-  await page.getByRole('button', { name: 'Start Game' }).click();
-  await Promise.all([hostPreparing, guestPreparing]);
-  const prepared = true;
+  const lobbySignals = await configureLobby(page, guestPage, waitUntil);
+  Object.assign(lobbySignals, await startWithRejectedSettings(page, guestPage));
 
   await Promise.all([
     page.locator('.countdown__number').waitFor(),
@@ -250,8 +245,7 @@ try {
       joined: true,
       reconnected: true,
       identitiesPreserved,
-      lobbyActions,
-      prepared,
+      ...lobbySignals,
       alarmTransitioned: true,
       resultRows: hostRows,
       scores,

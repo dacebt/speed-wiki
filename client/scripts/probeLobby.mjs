@@ -1,4 +1,4 @@
-export async function configureLobby(page, guestPage) {
+export async function configureLobby(page, guestPage, waitUntil) {
   if (
     (await page.getByText('Choose your portrait', { exact: true }).count()) !== 1 ||
     (await page.getByText('Round settings', { exact: true }).count()) !== 1
@@ -50,14 +50,27 @@ export async function configureLobby(page, guestPage) {
     }
     return true;
   }, 'lobby settings and cosmetics convergence');
-  return true;
+  return { lobbyActions: true };
 }
 
-async function waitUntil(predicate, label) {
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    if (await predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`${label} did not occur.`);
+export async function startWithRejectedSettings(page, guestPage) {
+  const hostPreparing = page.getByRole('heading', { name: 'Choosing articles' }).waitFor();
+  const guestPreparing = guestPage.getByRole('heading', { name: 'Choosing articles' }).waitFor();
+  const hostRejectedSettings = page
+    .getByText('Settings can only be changed in the lobby.', { exact: true })
+    .waitFor();
+
+  await page.evaluate(() => {
+    const buttons = [...document.querySelectorAll('button:not(:disabled)')];
+    const start = buttons.find((button) => button.textContent?.trim() === 'Start Game');
+    const preset = buttons.find((button) => button.textContent?.trim() === '10 min');
+    if (!(start instanceof HTMLButtonElement) || !(preset instanceof HTMLButtonElement)) {
+      throw new Error('Host Start and stale settings controls were not both enabled.');
+    }
+    start.click();
+    preset.click();
+  });
+
+  await Promise.all([hostPreparing, guestPreparing, hostRejectedSettings]);
+  return { prepared: true, recoverableActionError: true };
 }

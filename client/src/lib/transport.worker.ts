@@ -18,6 +18,7 @@ import {
   persistRoomMembership,
   type StoredMembershipResult,
 } from './roomMembership.js';
+import { RECOVERABLE_ROOM_ERROR_CODES } from './transportHelpers.js';
 import { closeFailure, delay, parseSocketMessage } from './transportHelpers.js';
 import {
   TransportConnectionError,
@@ -26,7 +27,6 @@ import {
   type TransportDisconnect,
   type TransportHandlers,
 } from './transportTypes.js';
-
 export const supportsInvitedJoining = true;
 export const supportsLobbyActions = true;
 export const supportsRoundStart = true;
@@ -271,7 +271,7 @@ function openMembership(
         return;
       }
       if (message.type === 'room/error') {
-        if (synced && message.code === 'hop-limit-reached') {
+        if (synced && RECOVERABLE_ROOM_ERROR_CODES.includes(message.code)) {
           notifyMessage(message);
           return;
         }

@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { CREDENTIAL, PLAYER_ID, workerTransportLobby } from './transport.worker.fixtures.js';
+import {
+  CREDENTIAL,
+  PLAYER_ID,
+  RECOVERABLE_ACTION_ERROR_CODES,
+  workerTransportLobby,
+} from './transport.worker.fixtures.js';
 
 const sockets: LifecycleSocket[] = [];
 const NEW_PLAYER_ID = 'c61ecdb5-0476-4503-953b-04567336f436';
@@ -359,38 +364,33 @@ describe('Worker Connection ownership', () => {
     },
   );
 
-  test('a hop-limit error remains a visible, nonterminal Room message', async () => {
-    stubBrowser('');
-    const transport = await import('./transport.worker.js');
-    const onMessage = vi.fn();
-    const onDisconnect = vi.fn();
-    const cleanup = transport.subscribe({
-      onMessage,
-      onConnect: vi.fn(),
-      onDisconnect,
-    });
-    await Promise.resolve();
-    sockets[0]!.open();
-    sockets[0]!.message({
-      type: 'room/sync',
-      room: workerTransportLobby(),
-      you: PLAYER_ID,
-      at: 1,
-    });
-    const error = {
-      type: 'room/error',
-      code: 'hop-limit-reached',
-      message: 'A Player may make at most 100 hops per round.',
-    } as const;
-    sockets[0]!.message(error);
-    await Promise.resolve();
+  test.each(RECOVERABLE_ACTION_ERROR_CODES)(
+    'a %s action error is visible and nonterminal',
+    async (code) => {
+      stubBrowser('');
+      const transport = await import('./transport.worker.js');
+      const handlers = { onMessage: vi.fn(), onConnect: vi.fn(), onDisconnect: vi.fn() };
+      const cleanup = transport.subscribe(handlers);
+      await Promise.resolve();
+      sockets[0]!.open();
+      sockets[0]!.message({
+        type: 'room/sync',
+        room: workerTransportLobby(),
+        you: PLAYER_ID,
+        at: 1,
+      });
+      const error = { type: 'room/error', code, message: 'The Room action was rejected.' } as const;
+      sockets[0]!.message(error);
+      await Promise.resolve();
 
-    expect(onMessage).toHaveBeenLastCalledWith(error);
-    expect(onDisconnect).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'terminal' }));
-    expect(sockets[0]!.readyState).toBe(LifecycleSocket.OPEN);
-    expect(localStorage.removeItem).not.toHaveBeenCalled();
-    cleanup();
-  });
+      expect(handlers.onMessage).toHaveBeenLastCalledWith(error);
+      expect(handlers.onDisconnect).not.toHaveBeenCalled();
+      expect(sockets[0]!.readyState).toBe(LifecycleSocket.OPEN);
+      expect(localStorage.removeItem).not.toHaveBeenCalled();
+      expect(localStorage.getItem('wikispeedrun.room.ABCD.membership')).not.toBeNull();
+      cleanup();
+    },
+  );
 
   test.each(['message-too-large', 'rate-limited'] as const)(
     'a %s policy error terminates the Connection but retains Membership storage',

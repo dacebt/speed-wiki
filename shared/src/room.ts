@@ -27,14 +27,6 @@ export interface RoomSettings {
   category: Category;
 }
 
-/** Shape-valid host settings received before the core applies domain rules. */
-export interface RoomSettingsPatch {
-  roundDurationMs?: number;
-  countdownMs?: number;
-  difficulty?: string;
-  category?: string;
-}
-
 /** A complete settings value whose catalog strings have not yet been validated. */
 export interface RoomSettingsCandidate {
   roundDurationMs: number;
@@ -42,6 +34,9 @@ export interface RoomSettingsCandidate {
   difficulty: string;
   category: string;
 }
+
+/** Shape-valid host settings received before the core applies domain rules. */
+export type RoomSettingsPatch = Partial<RoomSettingsCandidate>;
 
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   roundDurationMs: 10 * 60_000,

@@ -1,6 +1,18 @@
-import type { ServerMessage } from '@wikispeedrun/shared';
+import type { ErrorCode, ServerMessage } from '@wikispeedrun/shared';
 import { parseServerMessage } from './serverMessage.js';
 import { TransportConnectionError } from './transportTypes.js';
+
+export const RECOVERABLE_ROOM_ERROR_CODES: readonly ErrorCode[] = [
+  'invalid-request',
+  'room-unavailable',
+  'invalid-cosmetics',
+  'not-host',
+  'not-in-room',
+  'wrong-phase',
+  'invalid-settings',
+  'article-fetch-failed',
+  'hop-limit-reached',
+];
 
 export function parseSocketMessage(raw: unknown): ServerMessage | null {
   if (typeof raw !== 'string') return null;
